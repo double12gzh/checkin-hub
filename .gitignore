@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Sensitive Browser Context, Secrets & Authentication Data
+.browser-data/
+.env
+.env.local
+
+# Logs & Screenshots
+*.log
+*.png
+screenshots/
+
+# Operating System Files
+.DS_Store
+Thumbs.db

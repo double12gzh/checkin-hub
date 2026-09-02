@@ -1,0 +1,24 @@
+{
+  "name": "checkin-hub",
+  "version": "2.0.0",
+  "description": "Universal Daily Check-in Framework with Plugin Architecture",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "checkin": "node index.js",
+    "checkin:all": "node index.js --all",
+    "setup": "node index.js --setup agentrouter",
+    "list": "node index.js --list"
+  },
+  "keywords": [
+    "checkin",
+    "automation",
+    "playwright",
+    "agentrouter"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}
