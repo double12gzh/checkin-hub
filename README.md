@@ -26,7 +26,9 @@ checkin-hub/
 │   └── plugin-loader.js   # 动态插件扫描与加载器
 ├── plugins/               # 插件目录（新增插件直接在此创建）
 │   ├── agentrouter.js     # AgentRouter 签到插件
+│   ├── anyrouter.js       # AnyRouter 签到插件
 │   ├── hcnsec.js          # HCNSEC 签到插件
+│   ├── kktoken.js         # KKToken 签到插件
 │   └── example.js         # 插件模版示例
 ├── screenshots/           # 运行异常现场自动截图目录
 ├── .browser-data/         # 浏览器上下文持久化目录（已忽略）
@@ -48,14 +50,14 @@ npx playwright install chromium
 
 ### 2. 常用命令清单
 
-| 命令 | 说明 | 示例 |
-| :--- | :--- | :--- |
-| `node index.js --list` | **列出所有插件**及其状态 | `node index.js --list` 或 `npm run list` |
-| `node index.js <plugin_id>` | **仅运行单个指定插件** | `node index.js hcnsec`<br>`node index.js agentrouter` |
-| `node index.js --all` | **批量运行所有已启用插件**并生成汇总报表 | `node index.js --all` 或 `npm run checkin:all` |
-| `node index.js --setup <plugin_id>` | **交互式登录指定插件**（弹出浏览器完成首次登录并持久化 Session） | `node index.js --setup agentrouter` |
-| `node index.js <plugin_id> --debug` | **调试模式**（有头模式运行，方便排查页面交互问题） | `node index.js agentrouter --debug` |
-| `node index.js --help` | 查看完整的 CLI 参数帮助信息 | `node index.js --help` |
+| 命令                                | 说明                                                             | 示例                                                  |
+| :---------------------------------- | :--------------------------------------------------------------- | :---------------------------------------------------- |
+| `node index.js --list`              | **列出所有插件**及其状态                                         | `node index.js --list` 或 `npm run list`              |
+| `node index.js <plugin_id>`         | **仅运行单个指定插件**                                           | `node index.js hcnsec`<br>`node index.js agentrouter` |
+| `node index.js --all`               | **批量运行所有已启用插件**并生成汇总报表                         | `node index.js --all` 或 `npm run checkin:all`        |
+| `node index.js --setup <plugin_id>` | **交互式登录指定插件**（弹出浏览器完成首次登录并持久化 Session） | `node index.js --setup agentrouter`                   |
+| `node index.js <plugin_id> --debug` | **调试模式**（有头模式运行，方便排查页面交互问题）               | `node index.js agentrouter --debug`                   |
+| `node index.js --help`              | 查看完整的 CLI 参数帮助信息                                      | `node index.js --help`                                |
 
 #### 命令使用示例：
 
@@ -89,12 +91,12 @@ const { BasePlugin } = require('../core/base-plugin');
 class MySitePlugin extends BasePlugin {
   constructor() {
     super({
-      id: 'mysite',                  // 唯一英文 ID
-      name: '我的站点',               // 插件名称
-      description: '某平台每日打卡',   // 描述
+      id: 'mysite', // 唯一英文 ID
+      name: '我的站点', // 插件名称
+      description: '某平台每日打卡', // 描述
       url: 'https://example.com/dashboard',
       loginUrl: 'https://example.com/login',
-      enabled: true,                 // 是否启用
+      enabled: true, // 是否启用
     });
   }
 
@@ -128,7 +130,7 @@ module.exports = MySitePlugin;
 
 ```cron
 # 每天上午 08:30 自动执行所有启用的插件
-30 8 * * * cd /Users/jeffreyguan/Documents/scripts/checkin-hub && /usr/local/bin/node index.js --all >> checkin.log 2>&1
+30 8 * * * cd /path/to/checkin-hub && node index.js --all >> checkin.log 2>&1
 ```
 
 ---
@@ -138,9 +140,10 @@ module.exports = MySitePlugin;
 如果你使用 AI Agent（如 Antigravity、Claude Code、Cursor、Cline 等）进行日常巡检或开发插件，可直接使用以下标准 Prompt：
 
 ### 1. 每日打卡巡检 Prompt
+
 ```text
 请执行每日打卡任务：
-NO_COLOR=1 TERM=dumb cd /Users/jeffreyguan/Documents/scripts/checkin-hub && node index.js --all
+NO_COLOR=1 TERM=dumb cd /path/to/checkin-hub && node index.js --all
 
 判断规则：
 1. 若命令退出码为 0 且输出包含 "✅ 成功"，提取各个站点的签到结果与余额向我汇总汇报。
@@ -153,14 +156,16 @@ NO_COLOR=1 TERM=dumb cd /Users/jeffreyguan/Documents/scripts/checkin-hub && node
 ```
 
 ### 2. 初始化/登录指定插件 Prompt
+
 ```text
 请帮我初始化并登录插件 [插件ID，如 agentrouter]：
-cd /Users/jeffreyguan/Documents/scripts/checkin-hub && node index.js --setup [插件ID]
+cd /path/to/checkin-hub && node index.js --setup [插件ID]
 
 在控制台输出提示登录后，提醒我完成浏览器手动登录。
 ```
 
 ### 3. 让 Agent 开发新插件 Prompt
+
 ```text
 请为本项目添加一个名为 [目标站点名称] 的签到插件：
 1. 在 plugins/ 目录下新建 [站点英文名].js 文件，继承 core/base-plugin.js 中的 BasePlugin。

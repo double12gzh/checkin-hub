@@ -1,0 +1,20 @@
+# Checkin-Hub AI Agent Rules (.cursorrules)
+
+You are an AI Agent developing or maintaining the Checkin-Hub automation framework.
+All code generated or edited MUST comply with the following architectural and implementation standards:
+
+## Framework Contracts
+1. Core Separation: NEVER place site-specific business logic in `core/`. Only generic infrastructure (`BasePlugin`, `BrowserManager`, `PageHelper`, `PluginLoader`, `EnvLoader`).
+2. Plugin Contract: Every plugin in `plugins/<site_id>.js` MUST subclass `BasePlugin`, call `super({ id, name, url, loginUrl, enabled })`, and implement `async onCheckin({ page, browser, log, helper, options })`.
+3. Return Standard: Return `{ success: true, message: '...', balance?: '...' }` on success. Direct `throw new Error('...')` on failure to trigger automatic screenshot capture.
+
+## Playwright & Automation Rules
+1. Zero Arbitrary Sleeps: Do NOT use `page.waitForTimeout` or `setTimeout`. Always use locator state waits or URL predicates.
+2. No `commit` waits: Use `waitUntil: 'domcontentloaded'`, never `'commit'` (which closes context prematurely).
+3. Defensive UI: Use `.catch(() => {})` on optional elements (dialogs, banners, authorize buttons).
+4. OAuth: Use `PageHelper.handleOAuth(...)` for both popup and direct redirect flows.
+5. Timezone: Use CST (UTC+8) helpers (`helper.getCSTDateString()`) for today's checkin matching.
+
+## Code Quality & Verification
+1. Code Style: CommonJS, 2-space indentation, single quotes, semicolons, trailing commas (es5).
+2. Mandatory Verification: Always execute `npm run check` and `node index.js --list` before completing work.

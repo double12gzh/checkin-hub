@@ -49,7 +49,7 @@ class PageHelper {
   }
 
   /**
-   * Handle OAuth popup flow without waiting for non-existent auto-redirects.
+   * Handle OAuth flow (supports both popup mode and direct redirection).
    * @param {Object} params
    * @param {import('playwright').Page} params.page
    * @param {string} params.triggerSelector
@@ -57,15 +57,18 @@ class PageHelper {
    * @param {string} [params.targetUrl]
    * @param {number} [params.timeout=20000]
    */
-  static async handleOAuth({ page, triggerSelector, popupMatch, targetUrl, timeout = 20000 }) {
+  static async handleOAuth({ page, triggerSelector, popupMatch, targetUrl, timeout = 25000 }) {
     const triggerBtn = page.locator(triggerSelector).first();
-    const isVisible = await triggerBtn.isVisible({ timeout: 5000 }).catch(() => false);
+    await triggerBtn.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    const isVisible = await triggerBtn.isVisible().catch(() => false);
     if (!isVisible) {
-      throw new Error(`OAuth 触发按钮未找到: "${triggerSelector}". 请检查选择器或重新运行 --setup 进行登录。`);
+      throw new Error(
+        `OAuth 触发按钮未找到: "${triggerSelector}". 请检查选择器或重新运行 --setup 进行登录。`
+      );
     }
 
     const [popup] = await Promise.all([
-      page.waitForEvent('popup', { timeout: 10000 }).catch(() => null),
+      page.waitForEvent('popup', { timeout: 4000 }).catch(() => null),
       triggerBtn.click(),
     ]);
 
@@ -77,19 +80,83 @@ class PageHelper {
         ]).catch(() => {});
       }
       await popup.close().catch(() => {});
-    }
 
-    // Directly navigate main page to destination to avoid waiting 15s timeout
-    if (targetUrl) {
-      const cleanTarget = targetUrl.replace(/^\*+/, '').replace(/\*+$/, '');
-      let dest = cleanTarget;
-      try {
-        dest = cleanTarget.startsWith('http') ? cleanTarget : new URL(cleanTarget, page.url()).href;
-      } catch (e) {
-        dest = cleanTarget;
+      if (targetUrl) {
+        const cleanTarget = targetUrl.replace(/^\*+/, '').replace(/\*+$/, '');
+        let dest;
+        try {
+          dest = cleanTarget.startsWith('http')
+            ? cleanTarget
+            : new URL(cleanTarget, page.url()).href;
+        } catch (_) {
+          dest = cleanTarget;
+        }
+        if (dest.startsWith('http')) {
+          await page.goto(dest, { waitUntil: 'domcontentloaded', timeout }).catch(() => {});
+        }
       }
-      if (dest.startsWith('http')) {
-        await page.goto(dest, { waitUntil: 'domcontentloaded', timeout }).catch(() => {});
+    } else {
+      // Direct redirect mode in the current page
+      const cleanTarget = targetUrl ? targetUrl.replace(/^\*+/, '').replace(/\*+$/, '') : '';
+      // 1. Wait for either the GitHub authorization consent screen or final destination
+      const authBtnSelector =
+        'button:has-text("Authorize"), input[value="Authorize"], button[name="authorize"]';
+      await Promise.race([
+        page
+          .waitForSelector(authBtnSelector, { timeout: 8000 })
+          .then(async (btn) => {
+            if (btn && (await btn.isVisible().catch(() => false))) {
+              await btn.click().catch(() => {});
+            }
+          })
+          .catch(() => {}),
+        page
+          .waitForURL(
+            (url) => {
+              const u = url.href || url.toString();
+              if (u.includes('/oauth/github') || u.includes('/api/oauth')) return false;
+              return (
+                u.includes('/dashboard') ||
+                u.includes('/console') ||
+                (targetUrl && u.includes(targetUrl)) ||
+                (cleanTarget && u.includes(cleanTarget))
+              );
+            },
+            { timeout, waitUntil: 'domcontentloaded' }
+          )
+          .catch(() => {}),
+      ]);
+
+      // 2. Wait until redirection completes to the target or dashboard (ignoring intermediate /oauth callback)
+      await page
+        .waitForURL(
+          (url) => {
+            const u = url.href || url.toString();
+            if (u.includes('/oauth/github') || u.includes('/api/oauth')) return false;
+            return (
+              u.includes('/dashboard') ||
+              u.includes('/console') ||
+              (targetUrl && u.includes(targetUrl)) ||
+              (cleanTarget && u.includes(cleanTarget))
+            );
+          },
+          { timeout, waitUntil: 'domcontentloaded' }
+        )
+        .catch(() => {});
+
+      // 3. Ensure we are on target page
+      if (targetUrl) {
+        let dest;
+        try {
+          dest = cleanTarget.startsWith('http')
+            ? cleanTarget
+            : new URL(cleanTarget, page.url()).href;
+        } catch (_) {
+          dest = cleanTarget;
+        }
+        if (dest.startsWith('http') && !page.url().includes(dest)) {
+          await page.goto(dest, { waitUntil: 'domcontentloaded', timeout }).catch(() => {});
+        }
       }
     }
 
@@ -120,17 +187,19 @@ class PageHelper {
    * @param {string} [logoutApiUrl]
    */
   static async clearSiteStorage(page, logoutApiUrl = '/api/user/logout') {
-    await page.evaluate(async (apiPath) => {
-      if (apiPath) {
+    await page
+      .evaluate(async (apiPath) => {
+        if (apiPath) {
+          try {
+            await fetch(apiPath, { method: 'POST', credentials: 'include' });
+          } catch (e) {}
+        }
         try {
-          await fetch(apiPath, { method: 'POST', credentials: 'include' });
+          localStorage.clear();
+          sessionStorage.clear();
         } catch (e) {}
-      }
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-      } catch (e) {}
-    }, logoutApiUrl).catch(() => {});
+      }, logoutApiUrl)
+      .catch(() => {});
   }
 }
 

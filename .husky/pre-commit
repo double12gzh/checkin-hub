@@ -1,0 +1,2 @@
+npx lint-staged
+node scripts/verify-plugins.js

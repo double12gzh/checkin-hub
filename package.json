@@ -8,7 +8,13 @@
     "checkin": "node index.js",
     "checkin:all": "node index.js --all",
     "setup": "node index.js --setup agentrouter",
-    "list": "node index.js --list"
+    "list": "node index.js --list",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check && node scripts/verify-plugins.js",
+    "prepare": "husky"
   },
   "keywords": [
     "checkin",
@@ -20,5 +26,28 @@
   "license": "ISC",
   "dependencies": {
     "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.4.1",
+    "omp-dashboard": "^0.1.0",
+    "prettier": "^3.9.6"
+  },
+  "omp": {
+    "extensions": [
+      "./node_modules/omp-dashboard/dist/extension/index.js"
+    ]
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }

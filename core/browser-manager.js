@@ -28,16 +28,13 @@ class BrowserManager {
 
   /**
    * Resolve user data dir for a plugin.
-   * For 'agentrouter', if legacy root `.browser-data` exists, reuse it to avoid re-login.
+   * Defaults to `.browser-data/<plugin.id>`.
+   * @param {import('./base-plugin').BasePlugin} plugin
+   * @returns {string}
    */
   resolveUserDataDir(plugin) {
     if (plugin.userDataDir) {
       return plugin.userDataDir;
-    }
-
-    const legacyRootProfile = path.join(this.rootDir, '.browser-data');
-    if (plugin.id === 'agentrouter' && fs.existsSync(legacyRootProfile)) {
-      return legacyRootProfile;
     }
 
     const pluginProfile = path.join(this.rootDir, '.browser-data', plugin.id);
@@ -58,7 +55,9 @@ class BrowserManager {
     const headless = this.debug ? false : !isSetup;
     const userDataDir = this.resolveUserDataDir(plugin);
 
-    this.log(`[${plugin.name}] 正在启动浏览器 (Profile: ${path.basename(userDataDir)}, Headless: ${headless})...`);
+    this.log(
+      `[${plugin.name}] 正在启动浏览器 (Profile: ${path.basename(userDataDir)}, Headless: ${headless})...`
+    );
 
     const browser = await chromium.launchPersistentContext(userDataDir, {
       headless,
@@ -82,12 +81,17 @@ class BrowserManager {
         return { success: true, message: 'Setup completed successfully' };
       } else {
         const result = await plugin.onCheckin(context);
-        this.log(`[${plugin.name}] 执行完成: ${result.message || 'OK'}${result.balance ? ` (余额: ${result.balance})` : ''}`);
+        this.log(
+          `[${plugin.name}] 执行完成: ${result.message || 'OK'}${result.balance ? ` (余额: ${result.balance})` : ''}`
+        );
         return result;
       }
     } catch (err) {
       this.log(`[${plugin.name}] 错误: ${err.message}`);
-      const screenshotPath = path.join(this.screenshotsDir, `${plugin.id || 'error'}-${Date.now()}.png`);
+      const screenshotPath = path.join(
+        this.screenshotsDir,
+        `${plugin.id || 'error'}-${Date.now()}.png`
+      );
       await page.screenshot({ path: screenshotPath }).catch(() => {});
       this.log(`[${plugin.name}] 错误截图已保存至: ${screenshotPath}`);
       return { success: false, message: err.message, error: err };

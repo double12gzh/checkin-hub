@@ -1,0 +1,6 @@
+node_modules/
+.browser-data/
+screenshots/
+package-lock.json
+*.log
+backup/

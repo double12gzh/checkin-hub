@@ -102,7 +102,9 @@ async function main() {
   // Single plugin execution
   const plugin = plugins.get(targetPluginId);
   if (!plugin) {
-    console.error(`❌ 未找到 ID 为 "${targetPluginId}" 的插件！请通过 "node index.js --list" 查看可用插件。`);
+    console.error(
+      `❌ 未找到 ID 为 "${targetPluginId}" 的插件！请通过 "node index.js --list" 查看可用插件。`
+    );
     process.exitCode = 1;
     return;
   }

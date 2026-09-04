@@ -19,7 +19,9 @@ class HcnsecPlugin extends BasePlugin {
     const password = process.env.HCNSEC_PASSWORD;
 
     if (!username || !password) {
-      throw new Error('缺少 HCNSEC 账号密码！请在 .env 文件中配置 HCNSEC_USERNAME 和 HCNSEC_PASSWORD。');
+      throw new Error(
+        '缺少 HCNSEC 账号密码！请在 .env 文件中配置 HCNSEC_USERNAME 和 HCNSEC_PASSWORD。'
+      );
     }
 
     log(`正在登录 HCNSEC (用户: ${username})...`);
@@ -46,7 +48,7 @@ class HcnsecPlugin extends BasePlugin {
 
     const authHeaders = {
       'Content-Type': 'application/json',
-      'Cookie': cookie,
+      Cookie: cookie,
       'New-Api-User': String(userId),
     };
 

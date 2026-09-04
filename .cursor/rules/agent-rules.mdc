@@ -1,0 +1,91 @@
+---
+description: Checkin-Hub Plugin and Core Development Rules for AI Agents
+globs: ["**/*.js", "plugins/**/*.js", "core/**/*.js"]
+alwaysApply: true
+---
+
+# Checkin-Hub AI Agent Development Rules
+
+You are developing or maintaining the **Checkin-Hub** daily check-in automation framework.
+All code generated or modified MUST adhere strictly to the invariants, contracts, and code style rules defined below.
+
+---
+
+## 1. Architectural Invariants & Separation of Concerns
+
+- **`core/`**: Contains framework-level infrastructure only:
+  - `base-plugin.js`: Base class and contract definitions.
+  - `browser-manager.js`: Playwright context lifecycle, profile directory isolation, and screenshot capture.
+  - `helper.js`: Shared DOM utilities (`PageHelper`: modal dismissal, OAuth flows, cookie clearing).
+  - `plugin-loader.js`: Dynamic discovery of plugins in `plugins/`.
+  - `env.js`: Portable `.env` loader.
+  - **Rule**: NEVER place site-specific business logic inside `core/`.
+- **`plugins/`**: Every check-in site MUST be isolated in its own file (`plugins/<site_id>.js`).
+- **Profile Isolation**: Each plugin's browser storage is isolated at `.browser-data/<plugin.id>`. NEVER share or mix browser state across plugins.
+- **Portability**: NEVER hardcode workstation paths (e.g. `/Users/...`, `/home/...`).
+
+---
+
+## 2. Plugin Contract & Lifecycle Specifications
+
+Every plugin file in `plugins/<site_id>.js` MUST comply with the following contract:
+
+1. **Inheritance**:
+   ```javascript
+   const { BasePlugin } = require('../core/base-plugin');
+
+   class MySitePlugin extends BasePlugin {
+     constructor() {
+       super({
+         id: 'mysite', // lowercase alphanumeric, dashes/underscores only
+         name: 'MySite',
+         description: 'MySite 每日签到与余额查询',
+         url: 'https://mysite.com/dashboard',
+         loginUrl: 'https://mysite.com/login', // optional, defaults to url
+         enabled: true,
+       });
+     }
+   }
+   ```
+2. **`onCheckin` Hook (Mandatory)**:
+   - Signature: `async onCheckin({ page, browser, log, helper, options })`
+   - **Success**: Return `{ success: true, message: '说明信息', balance: '余额 (可选)' }`.
+   - **Failure**: Throw `new Error('失败具体原因')`. Do NOT swallow fatal errors or return `{ success: false }`; throwing allows `BrowserManager` to log error context and automatically take an error screenshot in `screenshots/`.
+3. **`onSetup` Hook (Optional)**:
+   - Use for interactive first-time login (`node index.js --setup <plugin_id>`).
+   - If overriding, use predicate-based `page.waitForURL((url) => ...)` with `waitUntil: 'domcontentloaded'`.
+
+---
+
+## 3. Playwright & UI Automation "Iron Rules"
+
+- **NO Arbitrary Sleeps**:
+  - NEVER use `page.waitForTimeout(...)` or `setTimeout(...)` without a documented `// ok: sleep` justification.
+  - ALWAYS wait on semantic locators (`locator.waitFor({ state: 'visible' })`), network calls, or URL predicates.
+- **NO `waitUntil: 'commit'`**:
+  - NEVER use `'commit'` for navigation waits; use `'domcontentloaded'` to ensure the DOM and storage are ready before the context is closed or actions proceed.
+- **Strict URL Predicates**:
+  - When waiting for URL transitions (e.g. after login), do NOT use naive globs like `'**/'` or `'**' + pathname + '*'`.
+  - Ensure the predicate returns `false` if the page is still on the login endpoint.
+- **Semantic Locators & Strict Mode**:
+  - Prioritize user-facing selectors: `page.locator('button:has-text("签到")')`, `role`, or text.
+  - Append `.first()` when selecting non-unique elements to prevent Playwright strict mode errors.
+- **Defensive Selectors**:
+  - For optional UI elements (banners, modals, cookie notices, OAuth consent buttons), ALWAYS append `.catch(() => {})` or `.catch(() => false)`.
+- **OAuth Automation**:
+  - Use `PageHelper.handleOAuth({ page, triggerSelector, popupMatch, targetUrl })`.
+- **Timezone Invariant**:
+  - All check-in timestamps and date comparisons MUST use China Standard Time (CST / UTC+8).
+  - Use `helper.getCSTDateString()` and `helper.getCSTDateTimeString()`.
+
+---
+
+## 4. Code Style & Pre-commit Quality
+
+- Standard: CommonJS (`require` / `module.exports`).
+- Formatting: 2 spaces, single quotes (`'`), semicolons (`true`), trailing commas (`es5`).
+- Pre-commit Enforcement: The repository uses `husky` + `lint-staged` + `scripts/verify-plugins.js`.
+- **Mandatory Agent Verification Before Reporting Done**:
+  1. `npm run check` (runs ESLint, Prettier check, and `scripts/verify-plugins.js`).
+  2. `node index.js --list` (ensures clean dynamic loading of all plugins).
+  3. All checks MUST exit with code 0 before yielding.

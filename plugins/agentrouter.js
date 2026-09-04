@@ -31,7 +31,10 @@ class AgentRouterPlugin extends BasePlugin {
 
       let logItems = [];
       try {
-        const rLog = await fetch('/api/log/self?p=1&page_size=10&type=4', { credentials: 'include', headers });
+        const rLog = await fetch('/api/log/self?p=1&page_size=10&type=4', {
+          credentials: 'include',
+          headers,
+        });
         const logData = await rLog.json();
         if (logData?.data?.items && Array.isArray(logData.data.items)) {
           logItems = logData.data.items;
@@ -89,8 +92,8 @@ class AgentRouterPlugin extends BasePlugin {
 
     // 🔄 完整流程：今日未签到或会话失效，执行登出并重新触发 GitHub OAuth
     log('今日未签到或会话已过期，开始重新认证触发签到...');
-    await helper.clearCookies(browser, AUTH_DOMAINS);
     await helper.clearSiteStorage(page);
+    await helper.clearCookies(browser, AUTH_DOMAINS);
 
     await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await helper.dismissModals(page);
@@ -120,10 +123,15 @@ class AgentRouterPlugin extends BasePlugin {
 
     // Fallback: DOM 检查
     log(`WARNING: 接口未检测到今日（${todayStr}）记录，尝试 DOM 回退检查...`);
-    await page.goto(`${this.url}/log`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page
+      .goto(`${this.url}/log`, { waitUntil: 'domcontentloaded', timeout: 20000 })
+      .catch(() => {});
     await helper.dismissModals(page);
 
-    const pageText = await page.locator('body').innerText().catch(() => '');
+    const pageText = await page
+      .locator('body')
+      .innerText()
+      .catch(() => '');
     if (pageText.includes('签到成功') && pageText.includes(todayStr)) {
       return {
         success: true,

@@ -1,0 +1,32 @@
+# Checkin-Hub AI Agent Rules (.clinerules)
+
+## Role & Mission
+You are an expert full-stack test automation engineer maintaining and extending `checkin-hub`.
+Your primary task is writing robust, flake-resistant Playwright daily check-in plugins and keeping core framework infrastructure resilient.
+
+## Non-Negotiable Engineering Invariants
+1. **Plugin Isolation**:
+   - Every site plugin MUST live in `plugins/<id>.js` and inherit from `core/base-plugin.js`.
+   - Plugin ID MUST match `^[a-z0-9_-]+$`.
+   - Browser profiles are isolated under `.browser-data/<plugin-id>`.
+2. **Error Handling**:
+   - On check-in failure, `throw new Error('清楚的失败原因')` so BrowserManager logs and captures diagnostic screenshots in `screenshots/`.
+   - On success, return `{ success: true, message: '...', balance?: '...' }`.
+3. **Flake Prevention**:
+   - Never use fixed sleep (`page.waitForTimeout` / `setTimeout`).
+   - Use `waitUntil: 'domcontentloaded'` instead of `'commit'`.
+   - Use predicate functions in `page.waitForURL((url) => ...)`, verifying that the URL is no longer on the login endpoint.
+   - Use `.first()` on ambiguous locators.
+   - Wrap optional selectors with `.catch(() => {})`.
+4. **Time & Environment**:
+   - Check-in timestamps and date strings MUST follow China Standard Time (UTC+8) via `helper.getCSTDateString()`.
+   - Never hardcode user workstation paths (e.g., `/Users/...`).
+   - Credentials must come from `.env` loaded via `core/env.js`.
+
+## Verification Protocol
+Before finishing any task, run:
+```bash
+npm run check
+node index.js --list
+```
+Both must exit with 0 without warnings or errors.
