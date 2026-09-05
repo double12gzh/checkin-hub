@@ -123,9 +123,6 @@ class KKTokenPlugin extends BasePlugin {
       targetUrl: this.url,
       timeout: 25000,
     });
-
-    await page.waitForTimeout(1500);
-
     // 重新获取用户信息与余额
     checkResult = await this.fetchUserData(page);
     if (checkResult.selfData?.success && checkResult.selfData?.data?.username) {

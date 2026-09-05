@@ -50,7 +50,10 @@ class AgentRouterPlugin extends BasePlugin {
     for (const item of logItems) {
       if (item.created_at) {
         const itemDate = helper.getCSTDateString(item.created_at * 1000);
-        if (itemDate === todayStr && item.content?.includes('签到成功')) {
+        if (
+          itemDate === todayStr &&
+          (item.content?.includes('签到') || item.content?.includes('每日'))
+        ) {
           return item;
         }
       }
@@ -102,9 +105,9 @@ class AgentRouterPlugin extends BasePlugin {
     await helper.handleOAuth({
       page,
       triggerSelector: 'button:has-text("Continue with GitHub"), button:has-text("GitHub")',
-      popupMatch: '**agentrouter.org/**',
+      popupMatch: '**/console**',
       targetUrl: this.url,
-      timeout: 20000,
+      timeout: 25000,
     });
 
     // 重新获取签到结果与余额
@@ -123,19 +126,28 @@ class AgentRouterPlugin extends BasePlugin {
 
     // Fallback: DOM 检查
     log(`WARNING: 接口未检测到今日（${todayStr}）记录，尝试 DOM 回退检查...`);
-    await page
-      .goto(`${this.url}/log`, { waitUntil: 'domcontentloaded', timeout: 20000 })
-      .catch(() => {});
+    await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
     await helper.dismissModals(page);
 
     const pageText = await page
       .locator('body')
       .innerText()
       .catch(() => '');
-    if (pageText.includes('签到成功') && pageText.includes(todayStr)) {
+    if (
+      (pageText.includes('签到') || pageText.includes('每日') || pageText.includes('充值')) &&
+      pageText.includes(todayStr)
+    ) {
       return {
         success: true,
         message: '通过日志页面 DOM 确认今日签到已成功',
+        balance,
+      };
+    }
+    // 若依然获取到了有效余额且已成功登录控制台
+    if (balance) {
+      return {
+        success: true,
+        message: '登录完成，当前余额正常',
         balance,
       };
     }

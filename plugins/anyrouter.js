@@ -166,50 +166,23 @@ class AnyRouterPlugin extends BasePlugin {
       if (!isGhVisible) {
         log('点击「其他登录选项」展开 GitHub 登录...');
         await otherLoginBtn.click().catch(() => {});
-        await page.waitForTimeout(500);
+        await page
+          .locator(ghBtnSelector)
+          .first()
+          .waitFor({ state: 'visible', timeout: 5000 })
+          .catch(() => {});
       }
     }
 
     log('触发 GitHub OAuth 登录流程（复用已缓存 GitHub 账号）...');
 
-    // 监听可能弹出的 OAuth 窗口并自动处理授权
-    const triggerBtn = page.locator(ghBtnSelector).first();
-    const isVisible = await triggerBtn.isVisible({ timeout: 5000 }).catch(() => false);
-    if (!isVisible) {
-      throw new Error(
-        '未找到 GitHub 登录按钮，请检查页面或运行 "node index.js --setup anyrouter" 进行初始化'
-      );
-    }
-
-    const [popup] = await Promise.all([
-      page.waitForEvent('popup', { timeout: 10000 }).catch(() => null),
-      triggerBtn.click(),
-    ]);
-
-    if (popup) {
-      // 若 GitHub 出现授权确认页，自动点击 Authorize
-      const authBtn = popup
-        .locator('button:has-text("Authorize"), button[name="authorize"]')
-        .first();
-      if (await authBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
-        log('检测到 GitHub 授权确认页面，正在自动确认授权...');
-        await authBtn.click().catch(() => {});
-      }
-
-      await Promise.race([
-        popup.waitForURL('**/oauth/github**', { timeout: 25000 }),
-        popup.waitForURL('**/console**', { timeout: 25000 }),
-        popup.waitForEvent('close', { timeout: 25000 }),
-      ]).catch(() => {});
-      await popup.waitForLoadState('networkidle').catch(() => {});
-      await page.waitForTimeout(2000);
-      await popup.close().catch(() => {});
-    }
-
-    // 主页面跳转回控制台
-    await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(1000);
-    await helper.dismissModals(page);
+    await helper.handleOAuth({
+      page,
+      triggerSelector: ghBtnSelector,
+      popupMatch: '**/console**',
+      targetUrl: this.url,
+      timeout: 25000,
+    });
 
     // 重新获取签到结果与余额
     checkResult = await this.fetchUserData(page);

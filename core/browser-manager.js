@@ -38,9 +38,33 @@ class BrowserManager {
     }
 
     const pluginProfile = path.join(this.rootDir, '.browser-data', plugin.id);
+    const legacyRootProfile = path.join(this.rootDir, '.browser-data');
+    const legacyDefaultDir = path.join(legacyRootProfile, 'Default');
+    const legacyLocalState = path.join(legacyRootProfile, 'Local State');
+
     if (!fs.existsSync(pluginProfile)) {
       fs.mkdirSync(pluginProfile, { recursive: true });
     }
+
+    // Profile isolation: seed isolated profile with authenticated session if available
+    const pluginDefaultDir = path.join(pluginProfile, 'Default');
+    const pluginLocalState = path.join(pluginProfile, 'Local State');
+
+    if (fs.existsSync(legacyDefaultDir) && fs.existsSync(legacyLocalState)) {
+      if (!fs.existsSync(pluginLocalState) || !fs.existsSync(pluginDefaultDir)) {
+        try {
+          if (!fs.existsSync(pluginLocalState)) {
+            fs.copyFileSync(legacyLocalState, pluginLocalState);
+          }
+          if (!fs.existsSync(pluginDefaultDir)) {
+            fs.cpSync(legacyDefaultDir, pluginDefaultDir, { recursive: true });
+          }
+        } catch (e) {
+          // Ignore copy errors
+        }
+      }
+    }
+
     return pluginProfile;
   }
 

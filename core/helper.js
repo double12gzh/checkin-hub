@@ -66,23 +66,74 @@ class PageHelper {
         `OAuth 触发按钮未找到: "${triggerSelector}". 请检查选择器或重新运行 --setup 进行登录。`
       );
     }
+    const cleanTarget = targetUrl ? targetUrl.replace(/^\*+/, '').replace(/\*+$/, '') : '';
+    const cleanPopupMatch =
+      typeof popupMatch === 'string' ? popupMatch.replace(/^\*+/, '').replace(/\*+$/, '') : null;
 
     const [popup] = await Promise.all([
-      page.waitForEvent('popup', { timeout: 4000 }).catch(() => null),
+      page.waitForEvent('popup', { timeout: 10000 }).catch(() => null),
       triggerBtn.click(),
     ]);
 
     if (popup) {
-      if (popupMatch) {
+      const isTargetUrl = (url) => {
+        const u = url.href || url.toString();
+        // 排除中间授权/登录阶段
+        if (
+          u.includes('/oauth/github') ||
+          u.includes('/api/oauth') ||
+          u.includes('/login') ||
+          u.includes('github.com/login')
+        ) {
+          return false;
+        }
+        if (typeof popupMatch === 'function') {
+          return popupMatch(url);
+        }
+        if (cleanPopupMatch && u.includes(cleanPopupMatch)) {
+          return true;
+        }
+        return (
+          u.includes('/dashboard') ||
+          u.includes('/console') ||
+          (cleanTarget && u.includes(cleanTarget))
+        );
+      };
+
+      if (!popup.isClosed() && !isTargetUrl(popup.url())) {
+        const authBtn = popup
+          .locator(
+            'button:has-text("Authorize"), button[name="authorize"], input[value="Authorize"]'
+          )
+          .first();
+
         await Promise.race([
-          popup.waitForURL(popupMatch, { timeout }),
-          popup.waitForEvent('close', { timeout }),
+          authBtn
+            .waitFor({ state: 'visible', timeout: 5000 })
+            .then(async () => {
+              await authBtn.click().catch(() => {});
+            })
+            .catch(() => {}),
+          popup.waitForURL(isTargetUrl, { timeout, waitUntil: 'domcontentloaded' }).catch(() => {}),
+          popup.waitForEvent('close', { timeout }).catch(() => {}),
         ]).catch(() => {});
+
+        if (!popup.isClosed() && !isTargetUrl(popup.url())) {
+          await Promise.race([
+            popup
+              .waitForURL(isTargetUrl, { timeout, waitUntil: 'domcontentloaded' })
+              .catch(() => {}),
+            popup.waitForEvent('close', { timeout }).catch(() => {}),
+          ]).catch(() => {});
+        }
       }
-      await popup.close().catch(() => {});
+
+      if (!popup.isClosed()) {
+        await popup.waitForLoadState('networkidle').catch(() => {});
+        await popup.close().catch(() => {});
+      }
 
       if (targetUrl) {
-        const cleanTarget = targetUrl.replace(/^\*+/, '').replace(/\*+$/, '');
         let dest;
         try {
           dest = cleanTarget.startsWith('http')
