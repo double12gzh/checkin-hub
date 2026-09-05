@@ -89,3 +89,30 @@ Every plugin file in `plugins/<site_id>.js` MUST comply with the following contr
   1. `npm run check` (runs ESLint, Prettier check, and `scripts/verify-plugins.js`).
   2. `node index.js --list` (ensures clean dynamic loading of all plugins).
   3. All checks MUST exit with code 0 before yielding.
+
+### 5. Git 提交与 Shell 命令规范（所有 Agent 强制遵守）
+
+#### 5.1 严禁裸用 `cat` 命令（防 alias 装饰符污染）
+- **背景**：用户本地终端环境将 `cat` 别名（alias）为了 `bat`。直接使用 `cat` 会输出行号和 `STDIN ─────────` 装饰框。
+- **强制规则**：
+  - **严禁**使用 `cat <<'EOF'` 或 `cat` 管道生成/写入 commit message，否则会导致提交日志充斥 `STDIN ─` 脏字符！
+  - 编写 commit 时，**必须使用单行字符串 `-m "..."`**；若必须通过命令输入多行，请使用 `printf "%s\n" "..."` 或转义绕过 alias：`\cat`。
+  - 读取文件内容优先使用专门的读文件工具（如 Agent 自带的 Read/View 工具），禁止使用裸 `cat` 读取。在 Shell 中必须使用 `\cat`。
+
+#### 5.2 Git Author & Committer 身份覆写
+- **背景**：严禁将用户的本地个人配置（Name/Email）直接作为 AI 生成的提交者或作者。
+- **强制规则**：
+  - 执行 `git commit` 时，必须显式覆写 **Author** 与 **Committer** 为当前使用的 AI Agent 身份。
+  - 提交信息末尾推荐附加 `Co-Authored-By: <Model/Agent> <noreply@...>`。
+
+#### 5.3 Commit Message 格式对齐
+- 统一遵循 Conventional Commits 格式：`<type>(<scope>): <subject>`。
+- `type` 取值范围：
+  - `feat`: 新增功能
+  - `fix`: 修复 bug
+  - `style`: 格式、样式微调（不影响逻辑）
+  - `refactor`: 重构（非新增功能亦非 bug 修复）
+  - `docs`: 文档变更
+  - `test`: 增加或修改测试用例
+  - `chore`: 构建系统、依赖更新或辅助工具变动
+- 详细的 `scope` 定义请参见各子项目的 `AGENTS.md`。
