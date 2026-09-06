@@ -99,12 +99,15 @@ Every plugin file in `plugins/<site_id>.js` MUST comply with the following contr
   - 编写 commit 时，**必须使用单行字符串 `-m "..."`**；若必须通过命令输入多行，请使用 `printf "%s\n" "..."` 或转义绕过 alias：`\cat`。
   - 读取文件内容优先使用专门的读文件工具（如 Agent 自带的 Read/View 工具），禁止使用裸 `cat` 读取。在 Shell 中必须使用 `\cat`。
 
-#### 5.2 Git Author & Committer 身份覆写
-- **背景**：严禁将用户的本地个人配置（Name/Email）直接作为 AI 生成的提交者或作者。
+#### 5.2 Git 身份归属与 AI 协同署名规范（架构 2：人类主权 + AI 审计）
+- **背景与权责划分**：
+  - 为保障代码责任终身追溯、Git Blame 精准定位、团队合规以及人类贡献度（GitHub 绿格子正常计入），**代码的最终责任人与主所有者永远是当前操作的人类开发者**。
+  - AI Agent 作为结对编程助手（Pair Programmer），其协同贡献通过业界标准的 `Co-Authored-By` 进行审计追踪。
 - **强制规则**：
-  - 执行 `git commit` 时，必须显式覆写 **Author** 与 **Committer** 为当前使用的 AI Agent 身份。
-  - 提交信息末尾推荐附加 `Co-Authored-By: <Model/Agent> <noreply@...>`。
-
+  - **Author & Committer 归属人类**：执行 `git commit` 时，必须直接继承并使用当前操作者本地配置的个人身份（`user.name` 与 `user.email`），严禁篡改或抹除人类主责任人。
+  - **AI 协同署名（强制附加）**：提交信息末尾**必须显式附加** `Co-Authored-By: <Model> <noreply@...>` 尾注。
+  - **模型名称规范**：仅使用简明的大类模型名字，**严禁携带版本号与冗余细节**（如仅使用：`Gemini`、`Claude`、`GPT`、`DeepSeek` 等，严禁使用 `Gemini 3.8 Flash`、`Claude 3.7 Sonnet`）。
+  - **邮箱格式规范**：使用对应模型的官方域名（如 `noreply@anthropic.com`、`noreply@google.com`、`noreply@openai.com`、`noreply@deepseek.com` 等）。
 #### 5.3 Commit Message 格式对齐
 - 统一遵循 Conventional Commits 格式：`<type>(<scope>): <subject>`。
 - `type` 取值范围：
