@@ -75,8 +75,8 @@ class AgentRouterPlugin extends BasePlugin {
     const todayStr = helper.getCSTDateString();
 
     // 🚀 Fast-Path 1: 先尝试快速预检（若当前已有有效会话且今日已签到，直接返回，耗时 1~2s）
-    log('正在检查当前会话与今日签到状态...');
-    await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    log('正在检查当前会话与今日签到状态（针对响应较慢放宽等待至 60s）...');
+    await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
     await helper.dismissModals(page);
 
     let checkResult = await this.fetchUserData(page);
@@ -98,19 +98,38 @@ class AgentRouterPlugin extends BasePlugin {
     await helper.clearSiteStorage(page);
     await helper.clearCookies(browser, AUTH_DOMAINS);
 
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    // 确保 status 中注入 github_client_id，防止 client_id 为 undefined 导致 OAuth 弹窗卡死
+    await page
+      .evaluate(() => {
+        try {
+          const status = JSON.parse(localStorage.getItem('status') || '{}');
+          if (!status.github_client_id) {
+            status.github_oauth = true;
+            status.github_client_id = 'Ov23lidtiR4LeVZvVRNL';
+            localStorage.setItem('status', JSON.stringify(status));
+          }
+        } catch (e) {}
+      })
+      .catch(() => {});
+
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
     await helper.dismissModals(page);
 
     log('触发 GitHub OAuth 登录流程...');
+    const ghBtnSelector =
+      'button:has-text("Continue with GitHub"), button:has-text("使用 GitHub 继续")';
     await helper.handleOAuth({
       page,
-      triggerSelector: 'button:has-text("Continue with GitHub"), button:has-text("GitHub")',
+      triggerSelector: ghBtnSelector,
       popupMatch: '**/console**',
       targetUrl: this.url,
-      timeout: 25000,
+      timeout: 60000,
     });
 
-    // 重新获取签到结果与余额
+    // 重新获取签到结果与余额（适配较慢响应）
+    log('登录完成，正在查询签到日志与账户额度...');
     checkResult = await this.fetchUserData(page);
     todayCheckin = this.findTodayCheckin(checkResult.logItems, todayStr, helper);
     const balance = this.calculateBalance(checkResult.selfData);
@@ -124,10 +143,15 @@ class AgentRouterPlugin extends BasePlugin {
       };
     }
 
-    // Fallback: DOM 检查
+    // Fallback: DOM 检查（导航至 /console/log 页面等待表格加载）
     log(`WARNING: 接口未检测到今日（${todayStr}）记录，尝试 DOM 回退检查...`);
-    await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    const logPageUrl = `${this.url}/log`;
+    await page.goto(logPageUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
     await helper.dismissModals(page);
+
+    // 等待日志表格或内容渲染（适配服务端慢查询，最多等待 30s）
+    const tableRow = page.locator('table tr, .semi-table-row').first();
+    await tableRow.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {});
 
     const pageText = await page
       .locator('body')
@@ -135,7 +159,7 @@ class AgentRouterPlugin extends BasePlugin {
       .catch(() => '');
     if (
       (pageText.includes('签到') || pageText.includes('每日') || pageText.includes('充值')) &&
-      pageText.includes(todayStr)
+      (pageText.includes(todayStr) || pageText.includes(todayStr.replace(/\//g, '-')))
     ) {
       return {
         success: true,
