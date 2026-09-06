@@ -77,6 +77,11 @@ async function main() {
         console.log(`[跳过] 插件 [${id}] ${plugin.name} 当前处于禁用状态。`);
         continue;
       }
+      if (results.length > 0) {
+        // 批量打卡时在不同站点之间随机等待 1.5~3.5 秒，模拟拟人化行为规避 WAF 机械请求频率拦截
+        const jitterMs = Math.floor(Math.random() * 2000) + 1500;
+        await new Promise((resolve) => setTimeout(resolve, jitterMs)); // ok: sleep
+      }
       console.log(`\n================== [${plugin.name}] ==================`);
       const res = await browserManager.execute(plugin, 'checkin');
       results.push({ id, name: plugin.name, url: plugin.url, ...res });

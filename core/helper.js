@@ -215,14 +215,20 @@ class PageHelper {
   }
 
   /**
-   * Clear cookies for specified domains.
+   * Clear cookies for specified domains while preserving Cloudflare and WAF security clearance cookies.
    * @param {import('playwright').BrowserContext} browser
    * @param {string[]} domains
+   * @param {boolean} [preserveSecurityCookies=true]
    */
-  static async clearCookies(browser, domains = []) {
+  static async clearCookies(browser, domains = [], preserveSecurityCookies = true) {
+    const WAF_SECURITY_COOKIES = ['__cf_bm', 'cf_clearance', '_cfuvid', 'acw_tc', 'acw_sc'];
     try {
       const cookies = await browser.cookies();
       for (const c of cookies) {
+        // 保留 WAF 与安全凭证，避免破坏站点信誉机制
+        if (preserveSecurityCookies && WAF_SECURITY_COOKIES.some((sec) => c.name.startsWith(sec))) {
+          continue;
+        }
         if (domains.some((d) => c.domain.includes(d))) {
           await browser.clearCookies({ name: c.name, domain: c.domain });
         }
