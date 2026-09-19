@@ -13,6 +13,8 @@ Checkin-Hub 是一个基于 Node.js 与 Playwright 构建的通用插件化每�
 
 ```text
 checkin-hub/
+├── bin/                   # 全局命令行可执行文件
+│   └── checkin-hub.js     # 全局 CLI 入口（支持 --mcp 与标准参数）
 ├── core/                  # 框架核心基础设施（严禁存放特定业务逻辑）
 │   ├── base-plugin.js     # 插件基类（接口契约定义与默认生命周期实现）
 │   ├── browser-manager.js # Playwright 浏览器上下文管理、Profile 隔离与异常自动截图
@@ -22,17 +24,23 @@ checkin-hub/
 ├── plugins/               # 业务签到插件目录（新增站点打卡必须单独存放在此）
 │   ├── agentrouter.js     # AgentRouter 签到插件
 │   ├── anyrouter.js       # AnyRouter 签到插件
+│   ├── columbina.js       # Columbina 签到插件
 │   ├── hcnsec.js          # HCNSEC 签到插件
+│   ├── justdowork.js      # JustDoWork 签到插件
 │   ├── kktoken.js         # KKToken 签到插件
 │   └── example.js         # 插件标准模版示例
 ├── scripts/               # 架构契约校验脚本与工程工具
+│   ├── install-agent-tools.js # 多宿主 AI Agent (MCP / CLI) 配置与安装工具
 │   ├── verify-plugins.js  # 自动化插件接口契约与反模式静态扫描工具
 │   └── verify-commit-msg.js # 提交信息与 Co-Authored-By 规范校验工具
-├── test/                  # 自动化单元测试套件（原生 node:test，覆盖 core 与 scripts）
+├── test/                  # 自动化单元测试套件（原生 node:test，覆盖 core、scripts 与 mcp）
 │   ├── base-plugin.test.js
 │   ├── env.test.js
 │   ├── helper.test.js
+│   ├── mcp-server.test.js
 │   └── verify-commit-msg.test.js
+├── .agents/skills/        # 库内标准 Agent 技能集合
+│   └── author-checkin-plugin/ # 插件开发与重构专家技能指南
 ├── screenshots/           # 运行异常现场自动截图目录（由 BrowserManager 自动管理，已忽略）
 ├── .browser-data/         # 浏览器上下文持久化目录（按插件隔离，已忽略）
 ├── .cursor/rules/         # Cursor Modern Agent 规则配置
@@ -43,8 +51,9 @@ checkin-hub/
 ├── CLAUDE.md              # Claude Code / Claude Desktop 统一指令与项目规范
 ├── eslint.config.js       # ESLint 10+ 扁平化代码规范配置
 ├── .prettierrc.json       # Prettier 统一格式化标准配置
-├── index.js               # 框架统一 CLI 入口
-└── package.json           # 依赖与 npm 脚本配置
+├── mcp-server.js          # 原生 stdio Model Context Protocol (MCP) 服务端
+├── index.js               # 框架本地 CLI 入口
+└── package.json           # 依赖、全局 bin 与 npm 脚本配置
 ```
 
 ### 1.2 核心设计原则
@@ -97,6 +106,34 @@ npm run list
 ```bash
 node index.js <plugin_id>
 ```
+
+### 2.5 形态 A：原生 MCP Server 与全局 CLI（终极跨宿主模式）
+
+Checkin-Hub 原生内置了标准 JSON-RPC 2.0 stdio MCP 服务端与全局可执行 CLI，可直接被全生态的 AI Agent（Claude Desktop, Claude Code, Antigravity, Cursor, Windsurf, Cline 等）以原生 Tools 的形式调用：
+
+- **启动 MCP 服务端**：
+  ```bash
+  node mcp-server.js
+  # 或通过全局 CLI
+  checkin-hub --mcp
+  ```
+- **暴露的 3 大原生 MCP 工具**：
+  1. `checkin_run_all`: 批量执行所有启用的站点打卡，带防 WAF 拟人抖动与 Markdown 汇报表格。
+  2. `checkin_run_single(pluginId)`: 执行指定单个站点的签到打卡并获取最新余额。
+  3. `checkin_list_plugins`: 列出所有注册的插件及其状态。
+- **多宿主一键配置器**：
+  ```bash
+  node scripts/install-agent-tools.js
+  # 或自动建立全局软链接
+  npm run setup:agent -- --link
+  ```
+
+### 2.6 形态 B：库内插件开发 Agent 技能 (`author-checkin-plugin`)
+
+项目在 `.agents/skills/author-checkin-plugin/SKILL.md` 中维护了符合 Antigravity 与现代 Agent 技能标准的库内开发 SOP：
+
+- **触发意图**：当用户要求“新增/开发/重构/修复某站点签到插件”时自动激活。
+- **内置指引**：契约清单、8 项铁律、通用模板、常见反模式禁令、`PageHelper` 状态捕获与 CST 时区规约。
 
 ---
 

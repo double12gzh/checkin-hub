@@ -138,15 +138,63 @@ module.exports = MySitePlugin;
 
 ---
 
-## 🤖 AI Agent 集成与调用指南
+## 🤖 AI Agent 生态集成 (形态 A 终极模式 & 形态 B 技能)
 
-如果你使用 AI Agent（如 Antigravity、Claude Code、Cursor、Cline 等）进行日常巡检或开发插件，可直接使用以下标准 Prompt：
+CheckinHub 原生支持现代 AI Agent 两种深度的协同工作模式：
 
-### 1. 每日打卡巡检 Prompt
+---
+
+### 🌟 形态 A (终极模式)：原生 MCP Server + 全局 CLI
+
+无论是 **Claude Desktop**、**Claude Code**、**Google Antigravity**、**Cursor** 还是 **Windsurf**，均可将 CheckinHub 挂载为原生的工具服务（MCP Tools），在任何上下文、任何工作目录下直接唤起打卡，无需切换终端或手动切入项目路径。
+
+#### 1. 一键多宿主配置器
+
+运行以下命令，即可查看当前环境所有主流 Agent 的一键接入参数或完成全局 CLI 软链：
+
+```bash
+npm run setup:agent
+# 或直接自动建立全局 CLI 链接
+npm run setup:agent -- --link
+```
+
+#### 2. 全局 CLI 命令行支持
+
+执行 `npm link` 后，可在终端任意工作目录下直接执行：
+
+```bash
+checkin-hub --list            # 查看所有插件状态
+checkin-hub --all             # 批量每日打卡
+checkin-hub agentrouter       # 调试单个站点
+checkin-hub --mcp             # 启动 stdio MCP 服务端
+```
+
+#### 3. 暴露的核心 MCP 工具
+
+- `checkin_run_all`: 批量执行所有启用的站点打卡，带防 WAF 拟人抖动与 Markdown 汇报表格。
+- `checkin_run_single(pluginId)`: 执行指定单个站点的签到打卡并获取最新余额。
+- `checkin_list_plugins`: 列出所有注册的插件、状态与站点链接。
+
+---
+
+### 🛠️ 形态 B：库内插件开发 Agent 技能 (`author-checkin-plugin`)
+
+项目在 `.agents/skills/author-checkin-plugin/SKILL.md` 中内置了符合 Antigravity 与主流 Agent 技能标准的库内开发 SOP：
+
+- **触发意图**：当对 Agent 说“为某站点开发打卡插件”或“重构某插件”时自动激活。
+- **质量保障**：强制执行 Playwright“八项铁律”、CST 时区规约、严格 URL Predicate、以及 `npm run check` 自动化静态契约扫描。
+
+---
+
+### 📋 传统标准 Prompt 模版 (按需使用)
+
+如果当前 Agent 宿主未配置 MCP，可直接使用以下文本 Prompt：
+
+#### 1. 每日打卡巡检 Prompt
 
 ```text
 请执行每日打卡任务：
-NO_COLOR=1 TERM=dumb cd /path/to/checkin-hub && node index.js --all
+NO_COLOR=1 TERM=dumb checkin-hub --all
 
 判断规则：
 1. 若命令退出码为 0 且输出包含 "✅ 成功"，提取各个站点的签到结果与余额向我汇总汇报。
@@ -162,23 +210,13 @@ NO_COLOR=1 TERM=dumb cd /path/to/checkin-hub && node index.js --all
 
 ![AI Agent 每日打卡巡检效果演示](docs/images/agent_daily_task_demo.png)
 
-### 2. 初始化/登录指定插件 Prompt
+#### 2. 初始化/登录指定插件 Prompt
 
 ```text
 请帮我初始化并登录插件 [插件ID，如 agentrouter]：
-cd /path/to/checkin-hub && node index.js --setup [插件ID]
+checkin-hub --setup [插件ID]
 
 在控制台输出提示登录后，提醒我完成浏览器手动登录。
-```
-
-### 3. 让 Agent 开发新插件 Prompt
-
-```text
-请为本项目添加一个名为 [目标站点名称] 的签到插件：
-1. 在 plugins/ 目录下新建 [站点英文名].js 文件，继承 core/base-plugin.js 中的 BasePlugin。
-2. 设定站点主页 url 和登录页 loginUrl。
-3. 利用 context.helper 中的 dismissModals、handleOAuth 或 page.locator 编写 onCheckin 签到流程。
-4. 完成后运行 node index.js --list 验证插件加载是否正常。
 ```
 
 ---

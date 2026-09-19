@@ -3,12 +3,17 @@
   "version": "2.0.0",
   "description": "Universal Daily Check-in Framework with Plugin Architecture",
   "main": "index.js",
+  "bin": {
+    "checkin-hub": "./bin/checkin-hub.js"
+  },
   "scripts": {
     "start": "node index.js",
     "checkin": "node index.js",
     "checkin:all": "node index.js --all",
     "setup": "node index.js --setup agentrouter",
     "list": "node index.js --list",
+    "mcp": "node mcp-server.js",
+    "setup:agent": "node scripts/install-agent-tools.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

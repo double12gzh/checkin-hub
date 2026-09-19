@@ -9,6 +9,7 @@ class BrowserManager {
     this.logFile = path.join(this.rootDir, 'checkin.log');
     this.screenshotsDir = path.join(this.rootDir, 'screenshots');
     this.debug = !!options.debug;
+    this.customLogger = typeof options.logger === 'function' ? options.logger : null;
 
     if (!fs.existsSync(this.screenshotsDir)) {
       fs.mkdirSync(this.screenshotsDir, { recursive: true });
@@ -18,7 +19,11 @@ class BrowserManager {
   log(msg) {
     const ts = new Date().toISOString();
     const line = `[${ts}] ${msg}`;
-    console.log(line);
+    if (this.customLogger) {
+      this.customLogger(line);
+    } else {
+      console.log(line);
+    }
     try {
       fs.appendFileSync(this.logFile, `${line}\n`);
     } catch (e) {
