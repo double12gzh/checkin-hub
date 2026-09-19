@@ -208,7 +208,13 @@ NO_COLOR=1 TERM=dumb checkin-hub --all
 
 #### 效果演示（Agent 巡检汇总）
 
-![AI Agent 每日打卡巡检效果演示](docs/images/agent_daily_task_demo.png)
+<div align="center">
+  <a href="docs/images/agent_daily_task_demo.png" target="_blank">
+    <img src="docs/images/agent_daily_task_demo.png" alt="AI Agent 每日打卡巡检效果演示" width="480" />
+  </a>
+  <br />
+  <sub>✨ 效果演示：AI Agent 批量打卡自动巡检与结构化 Markdown 汇报</sub>
+</div>
 
 #### 2. 初始化/登录指定插件 Prompt
 
