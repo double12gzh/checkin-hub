@@ -32,7 +32,6 @@ module.exports = [
       'node_modules/**',
       '.browser-data/**',
       'screenshots/**',
-      'backup/**',
       '*.log',
       'package-lock.json',
     ],
