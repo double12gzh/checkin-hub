@@ -9,6 +9,7 @@ node_modules/
 # Logs & Screenshots
 *.log
 *.png
+!docs/images/**
 screenshots/
 
 # Operating System Files

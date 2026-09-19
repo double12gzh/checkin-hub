@@ -30,6 +30,9 @@ checkin-hub/
 │   ├── hcnsec.js          # HCNSEC 签到插件
 │   ├── kktoken.js         # KKToken 签到插件
 │   └── example.js         # 插件模版示例
+├── test/                  # 自动化单元测试套件
+├── docs/                  # 设计文档与静态资源目录
+│   └── images/            # 演示与说明截图
 ├── screenshots/           # 运行异常现场自动截图目录
 ├── .browser-data/         # 浏览器上下文持久化目录（已忽略）
 ├── .env                   # 账号密码配置文件（已忽略）
@@ -154,6 +157,10 @@ NO_COLOR=1 TERM=dumb cd /path/to/checkin-hub && node index.js --all
 2. 请将【站点】列显示为可点击跳转的 Markdown 超链接（如 `[AgentRouter](https://agentrouter.org/console)`、`[HCNSEC](https://api.hcnsec.cn)`）。
 3. 请直接输出纯文本内容，不要包含终端 ANSI 颜色转义字符或代码行号。
 ```
+
+#### 效果演示（Agent 巡检汇总）
+
+![AI Agent 每日打卡巡检效果演示](docs/images/agent_daily_task_demo.png)
 
 ### 2. 初始化/登录指定插件 Prompt
 
