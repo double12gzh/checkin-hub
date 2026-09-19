@@ -93,7 +93,9 @@ async function main() {
       const statusIcon = r.success ? '✅ 成功' : '❌ 失败';
       const balanceInfo = r.balance ? ` | 余额: ${r.balance}` : '';
       const linkName = r.url ? `[${r.name}](${r.url})` : `[${r.name}]`;
-      console.log(`${statusIcon} ${linkName} ${r.message}${balanceInfo}`);
+      const screenshotInfo =
+        !r.success && r.screenshotPath ? `\n   ↳ 现场截图: ${r.screenshotPath}` : '';
+      console.log(`${statusIcon} ${linkName} ${r.message}${balanceInfo}${screenshotInfo}`);
       if (!r.success) hasFailure = true;
     }
     console.log('====================================================\n');

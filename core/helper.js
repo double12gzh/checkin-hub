@@ -10,6 +10,23 @@ class PageHelper {
   }
 
   /**
+   * Format timestamp into ISO CST date string (YYYY-MM-DD).
+   */
+  static getCSTISODateString(timestampMs = Date.now()) {
+    const date = new Date(timestampMs);
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const d = parts.find((p) => p.type === 'day')?.value;
+    return `${y}-${m}-${d}`;
+  }
+
+  /**
    * Format timestamp into CST date time string.
    */
   static getCSTDateTimeString(timestampMs = Date.now()) {
@@ -24,12 +41,27 @@ class PageHelper {
    */
   static async dismissModals(page, customSelectors = []) {
     const defaultSelectors = [
+      '[data-testid="notice-dialog-close"]',
+      '[data-testid="notice-dialog-close-today"]',
+      '[data-slot="dialog-close"]',
+      'button:has-text("今日不再显示")',
+      'button:has-text("Don\'t show again today")',
       'button:has-text("今日关闭")',
       'button:has-text("关闭公告")',
       'button:has-text("关闭")',
       'button:has-text("Close")',
       '.semi-modal-close',
       'button[aria-label="Close"]',
+    ];
+
+    const overlaySelectors = [
+      '[data-slot="dialog-overlay"]',
+      '[data-slot="dialog-portal"]',
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '.semi-modal-wrap',
+      '.modal-backdrop',
+      '.overlay',
     ];
 
     const combined = [...customSelectors, ...defaultSelectors].join(', ');
@@ -39,9 +71,10 @@ class PageHelper {
         await modalBtn.click().catch(() => {});
       }
 
-      const overlay = page.locator('.semi-modal-wrap, .modal-backdrop, .overlay');
+      const overlay = page.locator(overlaySelectors.join(', ')).first();
       if (await overlay.isVisible().catch(() => false)) {
         await page.keyboard.press('Escape');
+        await overlay.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
       }
     } catch (e) {
       // Ignore modal dismissal failures
@@ -58,6 +91,8 @@ class PageHelper {
    * @param {number} [params.timeout=20000]
    */
   static async handleOAuth({ page, triggerSelector, popupMatch, targetUrl, timeout = 25000 }) {
+    await this.dismissModals(page);
+
     const triggerBtn = page.locator(triggerSelector).first();
     await triggerBtn.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
     const isVisible = await triggerBtn.isVisible().catch(() => false);
@@ -70,14 +105,37 @@ class PageHelper {
     const cleanPopupMatch =
       typeof popupMatch === 'string' ? popupMatch.replace(/^\*+/, '').replace(/\*+$/, '') : null;
 
+    const clickTrigger = async () => {
+      try {
+        await triggerBtn.click({ timeout: 8000 });
+      } catch (err) {
+        if (
+          err.message &&
+          (err.message.includes('intercepts pointer events') || err.message.includes('Timeout'))
+        ) {
+          await this.dismissModals(page);
+          await page.keyboard.press('Escape');
+          await triggerBtn.click({ timeout: 10000 });
+        } else {
+          throw err;
+        }
+      }
+    };
+
     const [popup] = await Promise.all([
       page.waitForEvent('popup', { timeout: 10000 }).catch(() => null),
-      triggerBtn.click(),
+      clickTrigger(),
     ]);
 
     if (popup) {
       const isTargetUrl = (url) => {
-        const u = url.href || url.toString();
+        let urlObj;
+        try {
+          urlObj = typeof url === 'string' ? new URL(url) : url;
+        } catch (_) {
+          urlObj = { href: String(url), pathname: String(url), toString: () => String(url) };
+        }
+        const u = urlObj.href || urlObj.toString();
         // 排除中间授权/登录阶段
         if (
           u.includes('/oauth/github') ||
@@ -88,7 +146,7 @@ class PageHelper {
           return false;
         }
         if (typeof popupMatch === 'function') {
-          return popupMatch(url);
+          return popupMatch(urlObj);
         }
         if (cleanPopupMatch && u.includes(cleanPopupMatch)) {
           return true;

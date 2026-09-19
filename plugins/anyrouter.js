@@ -35,7 +35,10 @@ class AnyRouterPlugin extends BasePlugin {
       .catch(() => {});
 
     log(`[${this.name}] 等待登录完成并跳转至控制台 (${this.url})...`);
-    await page.waitForURL('**/console**', { timeout: 300000 });
+    await page.waitForURL((url) => url.pathname.includes('/console'), {
+      timeout: 300000,
+      waitUntil: 'domcontentloaded',
+    });
     log(`[${this.name}] 登录成功！会话已自动保存。`);
   }
 
@@ -72,11 +75,15 @@ class AnyRouterPlugin extends BasePlugin {
 
   findTodayCheckin(logItems, todayStr, helper) {
     if (!logItems || logItems.length === 0) return null;
+    const todayISO = helper.getCSTISODateString ? helper.getCSTISODateString() : todayStr;
     for (const item of logItems) {
       if (item.created_at) {
         const itemDate = helper.getCSTDateString(item.created_at * 1000);
+        const itemDateISO = helper.getCSTISODateString
+          ? helper.getCSTISODateString(item.created_at * 1000)
+          : itemDate;
         if (
-          itemDate === todayStr &&
+          (itemDate === todayStr || itemDateISO === todayISO) &&
           (item.content?.includes('签到') || item.content?.includes('每日'))
         ) {
           return item;
@@ -179,7 +186,7 @@ class AnyRouterPlugin extends BasePlugin {
     await helper.handleOAuth({
       page,
       triggerSelector: ghBtnSelector,
-      popupMatch: '**/console**',
+      popupMatch: (url) => (url.pathname || url.toString()).includes('/console'),
       targetUrl: this.url,
       timeout: 25000,
     });
@@ -209,7 +216,13 @@ class AnyRouterPlugin extends BasePlugin {
       .locator('body')
       .innerText()
       .catch(() => '');
-    if ((pageText.includes('签到') || pageText.includes('充值')) && pageText.includes(todayStr)) {
+    const todayISO = helper.getCSTISODateString ? helper.getCSTISODateString() : todayStr;
+    if (
+      (pageText.includes('签到') || pageText.includes('充值')) &&
+      (pageText.includes(todayStr) ||
+        pageText.includes(todayISO) ||
+        pageText.includes(todayStr.replace(/\//g, '-')))
+    ) {
       return {
         success: true,
         message: '通过日志页面 DOM 确认今日签到已成功',

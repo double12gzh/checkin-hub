@@ -251,7 +251,7 @@ class BrowserManager {
       );
       await page.screenshot({ path: screenshotPath }).catch(() => {});
       this.log(`[${plugin.name}] 错误截图已保存至: ${screenshotPath}`);
-      return { success: false, message: err.message, error: err };
+      return { success: false, message: err.message, error: err, screenshotPath };
     } finally {
       await browser.close().catch(() => {});
     }

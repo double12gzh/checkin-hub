@@ -60,7 +60,7 @@ class JustDoWorkPlugin extends BasePlugin {
 
       let logItems = [];
       try {
-        const rLog = await fetch('/api/log/self?p=1&page_size=10', {
+        const rLog = await fetch('/api/log/self?p=1&page_size=10&type=4', {
           credentials: 'include',
           headers,
         });
@@ -101,11 +101,15 @@ class JustDoWorkPlugin extends BasePlugin {
    */
   findTodayCheckin(logItems, todayStr, helper) {
     if (!logItems || logItems.length === 0) return null;
+    const todayISO = helper.getCSTISODateString ? helper.getCSTISODateString() : todayStr;
     for (const item of logItems) {
       if (item.created_at) {
         const itemDate = helper.getCSTDateString(item.created_at * 1000);
+        const itemDateISO = helper.getCSTISODateString
+          ? helper.getCSTISODateString(item.created_at * 1000)
+          : itemDate;
         if (
-          itemDate === todayStr &&
+          (itemDate === todayStr || itemDateISO === todayISO) &&
           (item.content?.includes('签到') || item.content?.includes('每日'))
         ) {
           return item;
@@ -236,9 +240,12 @@ class JustDoWorkPlugin extends BasePlugin {
       .innerText()
       .catch(() => '');
 
+    const todayISO = helper.getCSTISODateString ? helper.getCSTISODateString() : todayStr;
     if (
       (pageText.includes('用户签到') || pageText.includes('签到') || pageText.includes('每日')) &&
-      (pageText.includes(todayStr) || pageText.includes(todayStr.replace(/\//g, '-')))
+      (pageText.includes(todayStr) ||
+        pageText.includes(todayISO) ||
+        pageText.includes(todayStr.replace(/\//g, '-')))
     ) {
       return {
         success: true,

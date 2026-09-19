@@ -119,7 +119,7 @@ class KKTokenPlugin extends BasePlugin {
     await helper.handleOAuth({
       page,
       triggerSelector: 'button:has-text("Continue with GitHub"), button:has-text("GitHub")',
-      popupMatch: '**/dashboard**',
+      popupMatch: (url) => (url.pathname || url.toString()).includes('/dashboard'),
       targetUrl: this.url,
       timeout: 25000,
     });

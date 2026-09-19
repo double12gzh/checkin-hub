@@ -143,6 +143,13 @@ for (const target of scanTargets) {
         `${relPath}:${lineNum} - Potential arbitrary sleep detected. Prefer locator/URL predicates over fixed delays.`
       );
     }
+
+    // Check 4: Glob pattern strings in waitForURL or popupMatch
+    if (/(?:waitForURL|popupMatch)\s*[:(]\s*['"][*]+[^'"]*['"]/.test(line)) {
+      logFail(
+        `${relPath}:${lineNum} - Anti-pattern: Glob pattern detected in waitForURL or popupMatch. Use a strict predicate function instead.`
+      );
+    }
   });
 }
 
