@@ -1,6 +1,6 @@
 # AGENTS.md - AI Agent 运行与开发全景规范
 
-本文档是 **Checkin-Hub** 项目的权威架构蓝图与 AI Agent（Antigravity、Claude Code、Cursor、Windsurf、Cline、Roo-Code 等）行为准则。
+本文档是 **Checkin-Hub** 项目的权威架构蓝图与所有 AI Agent（包括各类 IDE 插件、终端 CLI 工具、自主调度平台等）的统一行为准则。
 所有协助开发、审查或巡检此项目的 AI Agent 均**必须严格遵循**本规范所定义的契约、架构边界及代码质量要求。
 
 ---
@@ -26,13 +26,15 @@ checkin-hub/
 │   ├── kktoken.js         # KKToken 签到插件
 │   └── example.js         # 插件标准模版示例
 ├── scripts/               # 架构契约校验脚本与工程工具
-│   └── verify-plugins.js  # 自动化插件接口契约与反模式静态扫描工具
+│   ├── verify-plugins.js  # 自动化插件接口契约与反模式静态扫描工具
+│   └── verify-commit-msg.js # 提交信息与 Co-Authored-By 规范校验工具
 ├── screenshots/           # 运行异常现场自动截图目录（由 BrowserManager 自动管理，已忽略）
 ├── .browser-data/         # 浏览器上下文持久化目录（按插件隔离，已忽略）
 ├── .cursor/rules/         # Cursor Modern Agent 规则配置
-├── .husky/                # Git Pre-commit 自动化检查钩子
+├── .husky/                # Git Pre-commit 与 Commit-msg 自动化检查钩子
 ├── .cursorrules           # Legacy Cursor / Windsurf 统一规则
 ├── .clinerules            # Cline / Roo-Code 统一规则
+├── CLAUDE.md              # Claude Code / Claude Desktop 统一指令与项目规范
 ├── eslint.config.js       # ESLint 10+ 扁平化代码规范配置
 ├── .prettierrc.json       # Prettier 统一格式化标准配置
 ├── index.js               # 框架统一 CLI 入口
@@ -253,6 +255,57 @@ node index.js --list
 
 - 若命令返回非 0 状态码，Agent **必须自行排查并修复**，直至命令返回 0。
 
+### 5.3 严禁裸用 `cat` 命令（防 alias 装饰符污染）
+
+- **背景**：用户本地终端环境将 `cat` 别名（alias）为了 `bat`。直接使用 `cat` 会输出行号和 `STDIN ─────────` 装饰框。
+- **强制规则**：
+  - **严禁**使用 `cat <<'EOF'` 或 `cat` 管道生成/写入 commit message，否则会导致提交日志充斥 `STDIN ─` 脏字符！
+  - 编写 commit 时，**必须使用单行字符串 `-m "..."`**；若必须通过命令输入多行，请使用 `printf "%s\n" "..."` 或转义绕过 alias：`\cat`。
+  - 读取文件内容优先使用专门的读文件工具（如 Agent 自带的 Read/View 工具），禁止使用裸 `cat` 读取。在 Shell 中必须使用 `\cat`。
+
+### 5.4 Git 身份归属与 AI 协同署名规范（架构 2：人类主权 + AI 审计）
+
+- **背景与权责划分**：
+  - 为保障代码责任终身追溯、Git Blame 精准定位、团队合规以及人类贡献度（GitHub 绿格子正常计入），**代码的最终责任人与主所有者永远是当前操作的人类开发者**。
+  - AI Agent 作为结对编程助手（Pair Programmer），其协同贡献通过业界标准的 `Co-Authored-By` 进行审计追踪。
+- **强制规则**：
+  - **Author & Committer 归属人类**：执行 `git commit` 时，必须直接继承并使用当前操作者本地配置的个人身份（`user.name` 与 `user.email`），严禁篡改或抹除人类主责任人。
+  - **AI 协同署名（强制附加）**：提交信息末尾**必须显式附加** `Co-Authored-By: <Model> <noreply@...>` 尾注。
+  - **模型名称规范（严格去版本化）**：仅使用简明核心大类名称，**严禁携带版本号与冗余细节**（例如仅使用：`Gemini`、`Claude`、`GPT`、`DeepSeek`、`Qwen` 等，严禁使用 `Gemini 3.8 Flash`、`Claude 3.7 Sonnet`、`GPT-4o`）。
+  - **邮箱格式规范**：使用对应模型厂商官方域名的 noreply 格式（`noreply@<厂商域名>`）。
+  - **通用构造公式**：
+    `Co-Authored-By: <厂商或模型系列核心大类英文名> <noreply@<厂商官方顶级域名>>`
+  - **常见模型参考示例（按大类抽象，非排他性枚举）**：
+    | 模型体系 / 品牌   | 标准署名格式（Co-Authored-By）                    |
+    | :---------------- | :------------------------------------------------ |
+    | Google Gemini     | `Co-Authored-By: Gemini <noreply@google.com>`     |
+    | Anthropic Claude  | `Co-Authored-By: Claude <noreply@anthropic.com>`  |
+    | OpenAI GPT        | `Co-Authored-By: GPT <noreply@openai.com>`        |
+    | DeepSeek          | `Co-Authored-By: DeepSeek <noreply@deepseek.com>` |
+    | 阿里通义千问 Qwen | `Co-Authored-By: Qwen <noreply@aliyun.com>`       |
+    | Meta Llama        | `Co-Authored-By: Llama <noreply@meta.com>`        |
+  - **命令执行标准模板**：
+
+    ```bash
+    git commit -m "<type>(<scope>): <subject>" \
+      -m "- <变更点 1>
+    - <变更点 2>" \
+      -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+    ```
+
+### 5.5 Commit Message 格式对齐
+
+- 统一遵循 Conventional Commits 格式：`<type>(<scope>): <subject>`。
+- `type` 取值范围：
+  - `feat`: 新增功能
+  - `fix`: 修复 bug
+  - `style`: 格式、样式微调（不影响逻辑）
+  - `refactor`: 重构（非新增功能亦非 bug 修复）
+  - `docs`: 文档变更
+  - `test`: 增加或修改测试用例
+  - `chore`: 构建系统、依赖更新或辅助工具变动
+- 常用 `scope`：`core`、`plugins`、`docs`、`scripts`、`config` 等。
+
 ---
 
 ## 📋 6. 标准 Prompt 模版库
@@ -284,6 +337,7 @@ NO_COLOR=1 TERM=dumb node index.js --all
 2. 严禁使用 page.waitForTimeout，使用状态等待与严格 URL Predicate。
 3. 遵循 CST (UTC+8) 日期比对。
 4. 开发完成后运行 npm run check 与 node index.js --list 确保无任何语法与契约报错。
+5. 若需提交代码，严格按 5.3~5.5 规范执行 git commit，严禁裸用 cat，并在末尾附加对应模型的 Co-Authored-By 审计署名。
 ```
 
 ### 6.3 修复插件反模式与规范 Prompt
@@ -293,5 +347,22 @@ NO_COLOR=1 TERM=dumb node index.js --all
 1. 消除所有 page.waitForTimeout 任意睡眠，改用 locator.waitFor 或 URL predicate。
 2. 消除任何 waitUntil: 'commit'，改用 'domcontentloaded'。
 3. 确保所有可选 DOM 操作均有防御性 catch 处理。
-4. 运行 npm run check 验证完全符合架构契约。
+4. 运行 npm run check 与 node index.js --list 验证完全符合架构契约。
+5. 若需提交代码，严格按 5.3~5.5 规范执行 git commit，严禁裸用 cat，并在末尾附加对应模型的 Co-Authored-By 审计署名。
+```
+
+### 6.4 标准代码提交与协同署名 Prompt
+
+```text
+请将当前工作区的代码变更提交至 Git：
+1. 运行并确认 npm run check 与 node index.js --list 全部通过（退出码为 0）。
+2. 遵循 Conventional Commits 规范编写提交信息（<type>(<scope>): <subject>）。
+3. 严格继承本地人类开发者身份（禁止篡改 Author/Committer），末尾强制附加合规的 AI 协同署名：
+   Co-Authored-By: <Model> <noreply@...>
+   （注意：模型名称仅用大类简称如 Gemini、Claude、GPT、DeepSeek，严禁携带版本号与分支型号）。
+4. 严禁裸用 cat 生成提交信息，统一采用多重 -m 参数提交：
+   git commit -m "<type>(<scope>): <subject>" \
+     -m "- <变更点 1>
+   - <变更点 2>" \
+     -m "Co-Authored-By: <Model> <noreply@...>"
 ```

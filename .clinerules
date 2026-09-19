@@ -30,3 +30,18 @@ npm run check
 node index.js --list
 ```
 Both must exit with 0 without warnings or errors.
+
+## Git Identity & AI Co-Authoring Rules
+1. **Never use bare `cat`** in commands (`cat` is aliased to `bat`). Use `\cat` or multi `-m` flags.
+2. **Author & Committer**: Always keep the local human user (`user.name` & `user.email`). Never overwrite.
+3. **Mandatory Co-Authored-By**: Append `Co-Authored-By: <Model> <noreply@...>` trailer to commits.
+4. **Model Name Standard**: Broad model category ONLY (`Claude`, `Gemini`, `GPT`, `DeepSeek`), NO version numbers (no `3.7`, `Flash`, `Sonnet`).
+5. **Official noreply domains**: `noreply@anthropic.com`, `noreply@google.com`, `noreply@openai.com`, `noreply@deepseek.com`.
+6. **Standard Command**:
+   ```bash
+   git commit -m "<type>(<scope>): <subject>" \
+     -m "- <变更点 1>
+- <变更点 2>" \
+     -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+   ```
+

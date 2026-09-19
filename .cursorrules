@@ -18,3 +18,18 @@ All code generated or edited MUST comply with the following architectural and im
 ## Code Quality & Verification
 1. Code Style: CommonJS, 2-space indentation, single quotes, semicolons, trailing commas (es5).
 2. Mandatory Verification: Always execute `npm run check` and `node index.js --list` before completing work.
+
+## Git Identity & AI Co-Authoring Rules
+1. Never use bare `cat` in shell commands (`cat` is aliased to `bat`). Use `\cat` or multi `-m` flags.
+2. Author & Committer MUST remain the human developer (`user.name` & `user.email`).
+3. Mandatory Co-Authored-By: Always append `Co-Authored-By: <Model> <noreply@...>` trailer to commits.
+4. Model Name Standard: Broad model category ONLY (`Claude`, `Gemini`, `GPT`, `DeepSeek`), NO version numbers (no `3.7`, `Flash`, `Sonnet`).
+5. Official noreply domains: `noreply@anthropic.com`, `noreply@google.com`, `noreply@openai.com`, `noreply@deepseek.com`.
+6. Standard execution format:
+   ```bash
+   git commit -m "<type>(<scope>): <subject>" \
+     -m "- <change 1>
+- <change 2>" \
+     -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+   ```
+

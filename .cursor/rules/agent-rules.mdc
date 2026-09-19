@@ -106,8 +106,27 @@ Every plugin file in `plugins/<site_id>.js` MUST comply with the following contr
 - **强制规则**：
   - **Author & Committer 归属人类**：执行 `git commit` 时，必须直接继承并使用当前操作者本地配置的个人身份（`user.name` 与 `user.email`），严禁篡改或抹除人类主责任人。
   - **AI 协同署名（强制附加）**：提交信息末尾**必须显式附加** `Co-Authored-By: <Model> <noreply@...>` 尾注。
-  - **模型名称规范**：仅使用简明的大类模型名字，**严禁携带版本号与冗余细节**（如仅使用：`Gemini`、`Claude`、`GPT`、`DeepSeek` 等，严禁使用 `Gemini 3.8 Flash`、`Claude 3.7 Sonnet`）。
-  - **邮箱格式规范**：使用对应模型的官方域名（如 `noreply@anthropic.com`、`noreply@google.com`、`noreply@openai.com`、`noreply@deepseek.com` 等）。
+  - **模型名称规范（严格去版本化）**：仅使用简明核心大类名称，**严禁携带版本号与冗余细节**（例如仅使用：`Gemini`、`Claude`、`GPT`、`DeepSeek`、`Qwen` 等，严禁使用 `Gemini 3.8 Flash`、`Claude 3.7 Sonnet`、`GPT-4o`）。
+  - **邮箱格式规范**：使用对应模型厂商官方域名的 noreply 格式（`noreply@<厂商域名>`）。
+  - **通用构造公式**：
+    `Co-Authored-By: <厂商或模型系列核心大类英文名> <noreply@<厂商官方顶级域名>>`
+- **常见模型参考示例（按大类抽象，非排他性枚举）**：
+  | 模型体系 / 品牌 | 标准署名格式（Co-Authored-By） |
+  | :--- | :--- |
+  | Google Gemini | `Co-Authored-By: Gemini <noreply@google.com>` |
+  | Anthropic Claude | `Co-Authored-By: Claude <noreply@anthropic.com>` |
+  | OpenAI GPT | `Co-Authored-By: GPT <noreply@openai.com>` |
+  | DeepSeek | `Co-Authored-By: DeepSeek <noreply@deepseek.com>` |
+  | 阿里通义千问 Qwen | `Co-Authored-By: Qwen <noreply@aliyun.com>` |
+  | Meta Llama | `Co-Authored-By: Llama <noreply@meta.com>` |
+- **命令执行标准模板**：
+  ```bash
+  git commit -m "<type>(<scope>): <subject>" \
+    -m "- <变更点 1>
+- <变更点 2>" \
+    -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+  ```
+
 #### 5.3 Commit Message 格式对齐
 - 统一遵循 Conventional Commits 格式：`<type>(<scope>): <subject>`。
 - `type` 取值范围：
