@@ -28,9 +28,15 @@ checkin-hub/
 ├── scripts/               # 架构契约校验脚本与工程工具
 │   ├── verify-plugins.js  # 自动化插件接口契约与反模式静态扫描工具
 │   └── verify-commit-msg.js # 提交信息与 Co-Authored-By 规范校验工具
+├── test/                  # 自动化单元测试套件（原生 node:test，覆盖 core 与 scripts）
+│   ├── base-plugin.test.js
+│   ├── env.test.js
+│   ├── helper.test.js
+│   └── verify-commit-msg.test.js
 ├── screenshots/           # 运行异常现场自动截图目录（由 BrowserManager 自动管理，已忽略）
 ├── .browser-data/         # 浏览器上下文持久化目录（按插件隔离，已忽略）
 ├── .cursor/rules/         # Cursor Modern Agent 规则配置
+├── .github/workflows/ci.yml # GitHub Actions 持续集成自动化工作流
 ├── .husky/                # Git Pre-commit 与 Commit-msg 自动化检查钩子
 ├── .cursorrules           # Legacy Cursor / Windsurf 统一规则
 ├── .clinerules            # Cline / Roo-Code 统一规则
@@ -234,22 +240,29 @@ module.exports = MySitePlugin;
 
 项目集成了自动化代码质量保障工具链，任何代码修改必须通过验证后才能交付。
 
-### 5.1 工具链组成
+### 5.1 工具链与 Harness 组成
 
 - **ESLint 10+** (`eslint.config.js`)：静态代码质量校验，拦截未定义变量、无用声明及逻辑缺陷。
 - **Prettier** (`.prettierrc.json`)：统一格式化标准（2空格缩进、单引号、分号、es5 尾随逗号、行宽 100）。
+- **Native Unit Test Suite** (`test/**/*.test.js`)：基于 Node.js 18+ 原生 `node:test` 与 `node:assert`，极速覆盖 `core/helper.js`（CST 时区与弹窗工具）、`core/env.js`、`core/base-plugin.js` 及 Git 提交审计脚本，实现零外部依赖防回归。
 - **Plugin Contract Linter** (`scripts/verify-plugins.js`)：框架专用契约检查器，自动扫描全部插件的基类继承、必须字段、反模式代码（如 `waitForTimeout`、`commit` 等）。
-- **Husky & lint-staged**：在每次 `git commit` 时自动触发 `lint-staged` 与 `verify-plugins.js`，不符合规范的代码将被拦截禁止提交。
+- **Git Hook 防御网** (`.husky/`)：
+  - `pre-commit`：自动触发 `lint-staged` 与 `verify-plugins.js`。
+  - `commit-msg`：触发 `scripts/verify-commit-msg.js` 自动校验 `Co-Authored-By` 模型去版本化与官方邮箱。
+- **GitHub Actions CI** (`.github/workflows/ci.yml`)：云端自动化流水线，在 Push 与 PR 时执行全套质检。
 
 ### 5.2 Agent 交付前自检清单
 
 AI Agent 在完成任何代码编写后，**必须在同一会话中运行并确认以下命令通过**：
 
 ```bash
-# 1. 运行全套静态校验与插件契约扫描
+# 1. 运行全套质检网（包含 Lint、Prettier、Unit Tests 单元测试与插件契约扫描）
 npm run check
 
-# 2. 验证插件动态发现与无报错加载
+# 2. 单独运行自动化单元测试套件（可选）
+npm test
+
+# 3. 验证插件动态发现与无报错加载
 node index.js --list
 ```
 

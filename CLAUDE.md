@@ -8,8 +8,11 @@
 ## 🛠️ 常用开发与巡检命令
 
 ```bash
-# 代码静态校验与契约测试（提交或交付前必跑）
+# 代码静态校验、单元测试与契约测试（提交或交付前必跑）
 npm run check
+
+# 运行自动化单元测试
+npm test
 
 # 列出所有已加载的插件
 node index.js --list
@@ -57,15 +60,13 @@ node index.js <plugin_id>
   - **模型名称规范**：仅使用简明的大类模型名字 `Claude`，**严禁携带版本号与冗余细节**（严禁使用 `Claude 3.7`、`Claude 3.7 Sonnet` 等）。
   - **邮箱格式规范**：必须使用官方域名 `noreply@anthropic.com`。
   - **命令执行标准模板**：
+
     ```bash
     git commit -m "<type>(<scope>): <subject>" \
       -m "- <变更点 1>
+    - <变更点 2>" \
+      -m "Co-Authored-By: Claude <noreply@anthropic.com>"
     ```
-- <变更点 2>" \
-  -m "Co-Authored-By: Claude <noreply@anthropic.com>"
-  ```
-
-  ```
 
 ---
 
