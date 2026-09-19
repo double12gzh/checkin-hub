@@ -1,0 +1,65 @@
+name: '🚀 新站点插件建议 (Plugin Request)'
+description: 提议为某个新网站开发自动化每日签到打卡与额度查询插件
+title: 'feat(plugins): request <站点英文ID> checkin plugin'
+labels: ['plugin-request', 'enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎为 Checkin-Hub 提议新的站点打卡插件！请尽量提供清晰的站点信息与打卡机制，方便社区开发者或 AI Agent 高效实现。
+  - type: input
+    id: site_name
+    attributes:
+      label: 站点展示名称 (Site Name)
+      placeholder: '例如: NewAI Platform'
+    validations:
+      required: true
+  - type: input
+    id: site_id
+    attributes:
+      label: 期望的插件 ID (Plugin ID)
+      description: 建议全小写英文字母、数字、短横线或下划线
+      placeholder: '例如: newai'
+    validations:
+      required: true
+  - type: input
+    id: site_url
+    attributes:
+      label: 站点主页或控制台 URL
+      placeholder: 'https://newai.example.com/console'
+    validations:
+      required: true
+  - type: input
+    id: login_url
+    attributes:
+      label: 站点登录页 URL (如有)
+      placeholder: 'https://newai.example.com/login'
+    validations:
+      required: false
+  - type: dropdown
+    id: auth_type
+    attributes:
+      label: 推荐的认证/登录方式
+      options:
+        - GitHub / LinuxDO / Google 等第三方 OAuth 授权
+        - 账号与密码登录（可通过 .env 配置）
+        - 邮箱验证码登录（需手动 --setup 捕获持久化 Cookie）
+        - 静态 Token / API Key 认证
+        - 其他方式
+    validations:
+      required: true
+  - type: textarea
+    id: checkin_flow
+    attributes:
+      label: 签到动作与流程描述
+      description: 描述进入控制台后，签到按钮的位置、提示文案、每日奖励以及余额展示位置。
+      placeholder: '例如：登录后位于主页右上角“每日签到”按钮，点击后提示“获得 0.5 美元”，个人主页可查看当前总额度。'
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 贡献意向
+      options:
+        - label: 我愿意基于 `author-checkin-plugin` 技能自行编写该插件并提交 PR！
+          required: false

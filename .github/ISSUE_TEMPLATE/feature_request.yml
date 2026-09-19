@@ -1,0 +1,39 @@
+name: '💡 框架功能与工具链改进建议 (Feature Request)'
+description: 提议对 Checkin-Hub 核心框架、MCP 服务、CLI 工具或自动化质量链的改进
+title: 'feat(<scope>): <简要功能提议>'
+labels: ['enhancement']
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 涉及的领域范围 (Scope)
+      options:
+        - core (浏览器管理、反反爬、DOM 工具箱等基础设施)
+        - mcp (Model Context Protocol 服务端与工具扩展)
+        - cli (命令行参数与全局 CLI)
+        - test (自动化测试与 CI 流水线)
+        - docs (规范与开发文档)
+        - other (其他)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 遇到的问题或改进背景
+      description: 当前缺少什么功能？或者遇到了什么不便之处？
+      placeholder: 请在此描述背景...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的解决方案 (Proposed Solution)
+      description: 清楚简洁地描述你希望实现的功能逻辑或架构设计
+      placeholder: 请描述你的设计思路或实现建议...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的备选方案
+      description: 是否有任何替代的解决方案或临时融通方法？

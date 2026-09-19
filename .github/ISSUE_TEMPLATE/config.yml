@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 查看 AI Agent 运行与开发规范 (AGENTS.md)
+    url: https://github.com/double12gzh/checkin-hub/blob/master/AGENTS.md
+    about: 包含 Playwright 八项铁律、接口契约与代码质量规范。
+  - name: 🛠️ 插件开发专家技能指南 (author-checkin-plugin)
+    url: https://github.com/double12gzh/checkin-hub/blob/master/.agents/skills/author-checkin-plugin/SKILL.md
+    about: 针对 AI Agent 与人类开发者的全流程插件编写 SOP。

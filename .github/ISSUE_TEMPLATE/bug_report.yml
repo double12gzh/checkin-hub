@@ -1,0 +1,79 @@
+name: '🐛 签到失败 / Bug 异常反馈'
+description: 提交某插件签到异常、站点页面变动导致选择器失效或框架报错
+title: 'fix(<plugin_or_core>): <简要问题描述>'
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提交 Issue！在提交前，请确认该站点的账号本身能够正常在浏览器中登录访问。
+  - type: dropdown
+    id: component
+    attributes:
+      label: 涉及的插件或组件
+      description: 请选择发生问题的插件或框架模块
+      options:
+        - agentrouter (AgentRouter)
+        - anyrouter (AnyRouter)
+        - columbina (Columbina)
+        - hcnsec (HCNSEC)
+        - justdowork (JustDoWork)
+        - kktoken (KKToken)
+        - core / browser-manager (浏览器引擎)
+        - mcp-server (MCP 协议服务)
+        - CLI / 其他
+    validations:
+      required: true
+  - type: dropdown
+    id: command_type
+    attributes:
+      label: 执行命令与模式
+      description: 发生问题时执行的命令形态
+      options:
+        - 单插件打卡: node index.js <plugin_id>
+        - 批量全部打卡: node index.js --all / npm run checkin:all
+        - 登录态初始化: node index.js --setup <plugin_id>
+        - 调试模式: node index.js <plugin_id> --debug
+        - 原生 MCP 工具: checkin_run_all / checkin_run_single
+        - 全局 CLI: checkin-hub
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 例如 macOS 15 (ARM64) / Ubuntu 22.04 / Windows 11，Node.js 版本 (如 v20.x, v25.x)
+      placeholder: 'macOS 15.4 / Node.js v25.9.0'
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 错误现象与异常描述
+      description: 详细描述发生了什么异常（例如：选择器超时、触发了 Cloudflare 5秒盾、会话过期自动重连失败等）
+      placeholder: 请在此描述具体的错误现象...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 控制台输出日志 (Console Logs)
+      description: 请粘贴运行失败时的完整日志输出（敏感账号密码请脱敏替换为 ***）
+      render: shell
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: 现场自动截屏图片 (Screenshots)
+      description: 框架在失败时会自动截取屏幕并保存至 `screenshots/<plugin_id>-<timestamp>.png`，请直接将该截图拖拽上传至此处。
+      placeholder: 直接拖拽或粘贴 screenshots/ 目录下的现场截图图片到此处
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前排查清单
+      options:
+        - label: 我已确认目标站点的账号在普通浏览器中可以正常登录访问
+          required: true
+        - label: 我已通过 `node index.js --setup <plugin_id>` 尝试重新捕获持久化会话
+          required: false
+        - label: 我已对提交的日志和截图中可能包含的敏感 Token/密码进行了脱敏
+          required: true
