@@ -28,6 +28,17 @@ module.exports = [
     },
   },
   {
+    files: ['**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        ...globals.es2024,
+      },
+    },
+  },
+  {
     ignores: [
       'node_modules/**',
       '.browser-data/**',

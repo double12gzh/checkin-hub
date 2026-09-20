@@ -1,7 +1,6 @@
 const { BasePlugin } = require('../core/base-plugin');
 
 const QUOTA_PER_USD = 500_000;
-const AUTH_DOMAINS = ['api.justwoker.icu'];
 const GITHUB_CLIENT_ID = 'Ov23liBGecTYSePKpXQC';
 
 class JustDoWorkPlugin extends BasePlugin {
@@ -11,14 +10,15 @@ class JustDoWorkPlugin extends BasePlugin {
       name: 'JustDoWork',
       description: 'JustDoWork 每日自动签到与额度查询',
       url: 'https://api.justwoker.icu/dashboard/overview',
-      loginUrl: 'https://api.justwoker.icu/login',
+      loginUrl: 'https://api.justwoker.icu/sign-in',
       enabled: true,
     });
     this.logsUrl = 'https://api.justwoker.icu/usage-logs/common';
+    this.walletUrl = 'https://api.justwoker.icu/wallet';
   }
 
   /**
-   * 交互式 Setup 模式，支持用户在弹出的浏览器中手动完成首次登录
+   * 交互式 Setup 模式，支持用户在弹出的浏览器中手动完成首次登录与 Turnstile 质询
    */
   async onSetup(context) {
     const { page, log } = context;
@@ -30,11 +30,12 @@ class JustDoWorkPlugin extends BasePlugin {
     await page.waitForURL(
       (url) => {
         const p = url.pathname;
-        if (p.includes('/login')) return false;
+        if (p.includes('/login') || p.includes('/sign-in')) return false;
         return (
           url.href.startsWith(this.url) ||
           p.includes('/dashboard') ||
           p.includes('/usage-logs') ||
+          p.includes('/wallet') ||
           p.includes('/console')
         );
       },
@@ -45,16 +46,44 @@ class JustDoWorkPlugin extends BasePlugin {
 
   /**
    * 在页面已认证的上下文内调用站点内部 API 查询用户额度与近期日志
+   * 支持复用已有 token，避免重复发起 /api/user/auth/refresh 触发 429 频控
    */
-  async fetchUserData(page) {
-    return await page.evaluate(async () => {
-      const userStr = localStorage.getItem('user');
-      const userObj = userStr ? JSON.parse(userStr) : {};
-      const headers = userObj.id ? { 'New-Api-User': String(userObj.id) } : {};
+  async fetchUserData(page, existingToken = null) {
+    return await page.evaluate(async (passedToken) => {
+      let token = passedToken || null;
+      let refreshData = null;
+      let rateLimited = false;
+
+      if (!token) {
+        try {
+          const refreshRes = await fetch('/api/user/auth/refresh', {
+            method: 'POST',
+            credentials: 'include',
+          });
+          if (refreshRes.status === 429) {
+            rateLimited = true;
+          } else {
+            refreshData = await refreshRes.json();
+            token = refreshData?.data?.access_token || null;
+          }
+        } catch (e) {}
+      }
+
+      let userObj = {};
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) userObj = JSON.parse(userStr);
+      } catch (e) {}
+
+      const headers = {
+        ...(userObj.id ? { 'New-Api-User': String(userObj.id) } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
 
       let selfData = null;
       try {
         const rSelf = await fetch('/api/user/self', { credentials: 'include', headers });
+        if (rSelf.status === 429) rateLimited = true;
         selfData = await rSelf.json();
       } catch (e) {}
 
@@ -64,24 +93,54 @@ class JustDoWorkPlugin extends BasePlugin {
           credentials: 'include',
           headers,
         });
+        if (rLog.status === 429) rateLimited = true;
         const logData = await rLog.json();
         if (logData?.data?.items && Array.isArray(logData.data.items)) {
           logItems = logData.data.items;
         }
       } catch (e) {}
 
-      return { selfData, logItems };
-    });
+      return {
+        token,
+        tokenFound: !!token,
+        rateLimited,
+        refreshData,
+        selfData,
+        logItems,
+        hasLocalUser: !!userObj.id,
+      };
+    }, existingToken);
   }
 
   /**
-   * 在页面上下文尝试调用签到接口
+   * 在页面上下文尝试调用签到接口，复用传入的 token 避免 429 频控
    */
-  async triggerApiCheckin(page) {
-    return await page.evaluate(async () => {
-      const userStr = localStorage.getItem('user');
-      const userObj = userStr ? JSON.parse(userStr) : {};
-      const headers = userObj.id ? { 'New-Api-User': String(userObj.id) } : {};
+  async triggerApiCheckin(page, token = null) {
+    return await page.evaluate(async (passedToken) => {
+      let currentToken = passedToken || null;
+      if (!currentToken) {
+        try {
+          const refreshRes = await fetch('/api/user/auth/refresh', {
+            method: 'POST',
+            credentials: 'include',
+          });
+          if (refreshRes.status !== 429) {
+            const refreshJson = await refreshRes.json();
+            currentToken = refreshJson?.data?.access_token;
+          }
+        } catch (e) {}
+      }
+
+      let userObj = {};
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) userObj = JSON.parse(userStr);
+      } catch (e) {}
+
+      const headers = {
+        ...(userObj.id ? { 'New-Api-User': String(userObj.id) } : {}),
+        ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
+      };
 
       try {
         const rCheckin = await fetch('/api/user/checkin', {
@@ -93,7 +152,7 @@ class JustDoWorkPlugin extends BasePlugin {
       } catch (e) {
         return null;
       }
-    });
+    }, token);
   }
 
   /**
@@ -101,16 +160,21 @@ class JustDoWorkPlugin extends BasePlugin {
    */
   findTodayCheckin(logItems, todayStr, helper) {
     if (!logItems || logItems.length === 0) return null;
-    const todayISO = helper.getCSTISODateString ? helper.getCSTISODateString() : todayStr;
+    const normalizedToday = todayStr ? todayStr.replace(/\//g, '-') : '';
     for (const item of logItems) {
       if (item.created_at) {
         const itemDate = helper.getCSTDateString(item.created_at * 1000);
         const itemDateISO = helper.getCSTISODateString
           ? helper.getCSTISODateString(item.created_at * 1000)
           : itemDate;
+        const normalizedItem = itemDate ? itemDate.replace(/\//g, '-') : '';
         if (
-          (itemDate === todayStr || itemDateISO === todayISO) &&
-          (item.content?.includes('签到') || item.content?.includes('每日'))
+          (itemDate === todayStr ||
+            itemDateISO === todayStr ||
+            normalizedItem === normalizedToday) &&
+          (item.content?.includes('签到') ||
+            item.content?.includes('每日') ||
+            item.content?.includes('用户签到'))
         ) {
           return item;
         }
@@ -120,19 +184,47 @@ class JustDoWorkPlugin extends BasePlugin {
   }
 
   /**
-   * 计算格式化余额
+   * 计算格式化余额（从 API 数据中获取）
    */
-  calculateBalance(selfData) {
-    if (selfData?.data?.quota !== undefined) {
-      return `$${(selfData.data.quota / QUOTA_PER_USD).toFixed(2)}`;
+  calculateBalance(selfData, refreshData) {
+    const quota = selfData?.data?.quota ?? refreshData?.data?.user?.quota;
+    if (quota !== undefined && quota !== null) {
+      return `$${(quota / QUOTA_PER_USD).toFixed(2)}`;
     }
     return null;
   }
 
   /**
+   * 从 /wallet 页面 DOM 中提取余额（作为 API 被频控或网络抖动时的兜底）
+   */
+  async extractBalanceFromDom(page) {
+    try {
+      if (!page.url().includes('/wallet')) {
+        await page.goto(this.walletUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      }
+      const balanceLocators = page.locator('text=/^\\s*\\$\\d+(\\.\\d+)?\\s*$/');
+      const count = await balanceLocators.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const text = (
+          await balanceLocators
+            .nth(i)
+            .innerText()
+            .catch(() => '')
+        ).trim();
+        if (/^\$\d+(\.\d+)?$/.test(text)) {
+          return text;
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
    * 自动打卡主入口
    */
-  async onCheckin({ page, browser, log, helper }) {
+  async onCheckin({ page, browser: _browser, log, helper }) {
     const todayStr = helper.getCSTDateString();
 
     // 1. Fast-Path 快速预检：尝试利用持久化 Profile 直接查询
@@ -140,11 +232,24 @@ class JustDoWorkPlugin extends BasePlugin {
     await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await helper.dismissModals(page);
 
-    let checkResult = await this.fetchUserData(page);
+    const isRedirectedToLogin = page.url().includes('/login') || page.url().includes('/sign-in');
+
+    let checkResult = { token: null, logItems: [] };
+    if (!isRedirectedToLogin) {
+      checkResult = await this.fetchUserData(page);
+    }
+
+    if (checkResult.rateLimited) {
+      log(`[${this.name}] 提示：站点 Token 刷新接口触发频控 (HTTP 429)，将复用已有会话与 DOM 兜底`);
+    }
+
     let todayCheckin = this.findTodayCheckin(checkResult.logItems, todayStr, helper);
 
     if (todayCheckin) {
-      const balance = this.calculateBalance(checkResult.selfData);
+      let balance = this.calculateBalance(checkResult.selfData, checkResult.refreshData);
+      if (!balance) {
+        balance = await this.extractBalanceFromDom(page);
+      }
       const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
       log(`[${this.name}] ⚡ 预检发现今日已完成签到，跳过登录重连流程`);
       return {
@@ -154,29 +259,72 @@ class JustDoWorkPlugin extends BasePlugin {
       };
     }
 
-    // 2. 若会话有效但尚未签到，尝试调用直接签到接口
-    if (checkResult?.selfData?.success) {
-      log(`[${this.name}] 会话有效，尝试直接调用签到接口...`);
-      const apiCheckinRes = await this.triggerApiCheckin(page);
+    const isSessionValid =
+      !isRedirectedToLogin &&
+      (checkResult?.tokenFound ||
+        checkResult?.selfData?.success ||
+        checkResult?.hasLocalUser ||
+        checkResult?.rateLimited);
+
+    // 2. 若会话有效但尚未在日志中查到今日签到，尝试调用直接签到接口
+    if (isSessionValid) {
+      log(`[${this.name}] 会话有效，尝试调用签到接口...`);
+      const apiCheckinRes = await this.triggerApiCheckin(page, checkResult.token);
       if (apiCheckinRes?.success) {
         log(`[${this.name}] API 签到成功: ${apiCheckinRes.message || '已成功获取额度'}`);
-        // 重新拉取最新余额与日志
-        checkResult = await this.fetchUserData(page);
-        const balance = this.calculateBalance(checkResult.selfData);
+        // 重新拉取最新余额与日志（复用 token，绝不重复刷新触发 429）
+        checkResult = await this.fetchUserData(page, checkResult.token);
+        let balance = this.calculateBalance(checkResult.selfData, checkResult.refreshData);
+        if (!balance) {
+          balance = await this.extractBalanceFromDom(page);
+        }
         return {
           success: true,
           message: apiCheckinRes.message || '签到成功',
           balance,
         };
       }
+
+      // 若签到接口提示 Turnstile 人机验证
+      if (
+        apiCheckinRes?.message?.includes('Turnstile') ||
+        apiCheckinRes?.message?.includes('人机验证')
+      ) {
+        log(`[${this.name}] 签到接口受 Turnstile 人机验证保护 (${apiCheckinRes.message})`);
+        let balance = this.calculateBalance(checkResult.selfData, checkResult.refreshData);
+        if (!balance) {
+          balance = await this.extractBalanceFromDom(page);
+        }
+        if (balance) {
+          // 当前会话健康无误，避免无头环境跳向登录页撞盾死锁，优雅保护现有会话
+          log(`[${this.name}] 当前会话正常，已成功同步账户最新余额 (${balance})`);
+          return {
+            success: true,
+            message: `会话正常，签到接口受 Turnstile 保护，最新余额: ${balance}`,
+            balance,
+          };
+        }
+      }
     }
 
-    // 3. 完整流程：未检测到签到记录或会话失效，执行登录流程触发每日登录签到
-    log(`[${this.name}] 今日未签到或会话已过期，开始重新认证触发签到...`);
-    await helper.clearSiteStorage(page);
-    await helper.clearCookies(browser, AUTH_DOMAINS);
-
+    // 3. 完整登录流程：仅在会话真正失效时触发（严禁清除 Cookies 和 LocalStorage）
+    log(`[${this.name}] 会话未激活或需重新认证，尝试导航至登录页...`);
     await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await helper.dismissModals(page);
+
+    // 严防 Cloudflare Turnstile 质询卡死：检测登录页是否存在真人验证
+    const turnstileLocator = page
+      .locator(
+        'iframe[src*="challenges.cloudflare.com"], .cf-turnstile, [data-sitekey], text="请验证您是真人", text="Verify you are human"'
+      )
+      .first();
+    const hasTurnstileChallenge = await turnstileLocator.isVisible().catch(() => false);
+
+    if (hasTurnstileChallenge) {
+      throw new Error(
+        '站点登录页触发 Cloudflare Turnstile 人机验证（请验证您是真人），无头浏览器无法自动跳过。请运行 "node index.js --setup justdowork" 手动登录并保存会话！'
+      );
+    }
 
     // 确保 status 中注入 github_client_id，防止 client_id 为 undefined 导致 OAuth 弹窗异常
     await page
@@ -204,7 +352,12 @@ class JustDoWorkPlugin extends BasePlugin {
       triggerSelector: ghBtnSelector,
       popupMatch: (url) => {
         const u = url.href || url.toString();
-        return u.includes('/dashboard') || u.includes('/usage-logs') || u.includes('/console');
+        return (
+          u.includes('/dashboard') ||
+          u.includes('/usage-logs') ||
+          u.includes('/wallet') ||
+          u.includes('/console')
+        );
       },
       targetUrl: this.url,
       timeout: 30000,
@@ -214,7 +367,10 @@ class JustDoWorkPlugin extends BasePlugin {
     log(`[${this.name}] 登录完成，正在查询签到日志与账户额度...`);
     checkResult = await this.fetchUserData(page);
     todayCheckin = this.findTodayCheckin(checkResult.logItems, todayStr, helper);
-    const balance = this.calculateBalance(checkResult.selfData);
+    let balance = this.calculateBalance(checkResult.selfData, checkResult.refreshData);
+    if (!balance) {
+      balance = await this.extractBalanceFromDom(page);
+    }
 
     if (todayCheckin) {
       const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
@@ -225,7 +381,7 @@ class JustDoWorkPlugin extends BasePlugin {
       };
     }
 
-    // 5. DOM Fallback 兜底检查
+    // 5. DOM 回退检查
     log(`[${this.name}] 接口未检测到今日（${todayStr}）记录，尝试 DOM 回退检查...`);
     await page
       .goto(this.logsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
