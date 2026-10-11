@@ -316,6 +316,29 @@ class PageHelper {
       }, logoutApiUrl)
       .catch(() => {});
   }
+
+  /**
+   * Open a URL in the user's native system default browser.
+   * Cross-platform support for macOS (open), Windows (start), and Linux (xdg-open).
+   * @param {string} url
+   * @returns {Promise<boolean>}
+   */
+  static async openSystemBrowser(url) {
+    const { exec } = require('child_process');
+    let cmd = '';
+    if (process.platform === 'darwin') {
+      cmd = `open "${url}"`;
+    } else if (process.platform === 'win32') {
+      cmd = `start "" "${url}"`;
+    } else {
+      cmd = `xdg-open "${url}"`;
+    }
+    return new Promise((resolve) => {
+      exec(cmd, (err) => {
+        resolve(!err);
+      });
+    });
+  }
 }
 
 module.exports = { PageHelper };

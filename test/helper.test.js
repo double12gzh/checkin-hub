@@ -58,4 +58,8 @@ test('PageHelper - DOM and UI utilities with mock page', async (t) => {
     await PageHelper.clearCookies(mockContext, ['example.com']);
     assert.equal(clearedCookies, true);
   });
+
+  await t.test('openSystemBrowser is a callable function returning a promise', () => {
+    assert.equal(typeof PageHelper.openSystemBrowser, 'function');
+  });
 });

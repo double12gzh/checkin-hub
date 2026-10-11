@@ -15,6 +15,7 @@ CheckinHub - 通用签到自动化框架
   node index.js <plugin_id>       执行指定插件打卡 (如 node index.js agentrouter)
   node index.js --all             执行所有已启用的插件
   node index.js --setup [plugin]  交互式登录模式 (打开浏览器以便手动登录保存 Session)
+  node index.js --setup [plugin] --system  系统原生浏览器模式 (彻底规避 Cloudflare 人机拦截并自动写入 Token)
   node index.js --list            列出所有已注册的插件
   node index.js --debug           调试模式 (显示浏览器界面)
   node index.js --help            查看帮助信息
@@ -22,6 +23,7 @@ CheckinHub - 通用签到自动化框架
 示例:
   node index.js agentrouter
   node index.js --setup agentrouter
+  node index.js --setup hcnsec --system
   node index.js --all
 `);
 }
@@ -31,6 +33,7 @@ async function main() {
   const isHelp = args.includes('--help') || args.includes('-h');
   const isList = args.includes('--list') || args.includes('-l');
   const isSetup = args.includes('--setup');
+  const isSystem = args.includes('--system');
   const isAll = args.includes('--all');
   const isDebug = args.includes('--debug');
 
@@ -117,7 +120,7 @@ async function main() {
   }
 
   const action = isSetup ? 'setup' : 'checkin';
-  const result = await browserManager.execute(plugin, action);
+  const result = await browserManager.execute(plugin, action, { isSystem });
 
   if (!result.success) {
     process.exitCode = 1;

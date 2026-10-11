@@ -48,6 +48,83 @@ class HcnsecPlugin extends BasePlugin {
   }
 
   /**
+   * 极简系统原生浏览器模式：自动唤起日常默认浏览器并在终端接收 Token 写入 .env
+   */
+  async onSystemSetup({ log, helper }) {
+    const readline = require('readline');
+    const { updateEnv } = require('../core/env');
+
+    log('🚀 正在通过系统原生命令唤起你的默认日常浏览器...');
+    await helper.openSystemBrowser(this.loginUrl);
+    log(`✅ 已在系统默认浏览器中打开登录页: ${this.loginUrl}`);
+
+    console.log(
+      '\n================================================================================'
+    );
+    console.log('💡 操作指南 (在刚才弹出的日常浏览器中)：');
+    console.log(
+      '1. 正常输入账号密码并点击【请验证您是真人】（原生浏览器绝不会报验证失败）并登录；'
+    );
+    console.log('2. 登录进入控制台后，按键盘 F12（或右键“检查”）打开 DevTools -> Console 控制台；');
+    console.log('3. 复制运行以下单行代码回车：\n');
+    console.log(
+      "   fetch('/api/user/auth/refresh', { method: 'POST', credentials: 'include' }).then(r => r.json()).then(res => console.log('HCNSEC_TOKEN=' + res.data?.access_token));\n"
+    );
+    console.log(
+      '================================================================================\n'
+    );
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const tokenInput = await new Promise((resolve) => {
+      rl.question('👉 请在此粘贴控制台输出的 Token 或整行内容 (按回车确认): ', (answer) => {
+        rl.close();
+        resolve(answer.trim());
+      });
+    });
+
+    if (!tokenInput) {
+      throw new Error('未输入 Token，操作已取消。');
+    }
+
+    let token = tokenInput;
+    if (token.startsWith('HCNSEC_TOKEN=')) {
+      token = token.slice(13).trim();
+    } else if (token.startsWith('TOKEN=')) {
+      token = token.slice(6).trim();
+    }
+
+    if (
+      (token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'"))
+    ) {
+      token = token.slice(1, -1).trim();
+    }
+
+    if (!token) {
+      throw new Error('无效的 Token 内容！');
+    }
+
+    log('正在将 HCNSEC_TOKEN 保存至项目根目录的 .env 文件...');
+    updateEnv('HCNSEC_TOKEN', token);
+    log('✅ Token 已成功保存至 .env！');
+
+    log('正在验证 Token 有效性并执行首次签到打卡...');
+    const checkinRes = await this.onCheckin({
+      page: null,
+      browser: null,
+      log,
+      helper,
+    });
+
+    log(`🎉 签到验证完成: ${checkinRes.message} | 账户余额: ${checkinRes.balance}`);
+    return checkinRes;
+  }
+
+  /**
    * 交互式 Setup 模式：支持在弹出的浏览器中完成登录与 Turnstile 人机验证
    */
   async onSetup(context) {
@@ -63,18 +140,9 @@ class HcnsecPlugin extends BasePlugin {
     log(
       `[${this.name}] --------------------------------------------------------------------------------`
     );
-    log(
-      `[${this.name}] 📌 遇到 Cloudflare 提示【验证失败 故障排除】时的推荐解法（免人机极速方案）：`
-    );
-    log(
-      `[${this.name}] 1. 直接在日常普通浏览器（Chrome/Safari）中登录 https://api.hcnsec.cn/sign-in`
-    );
-    log(`[${this.name}] 2. 登录进入控制台后，按 F12 打开 Console 控制台执行以下单行命令：`);
-    log(
-      `[${this.name}]    fetch('/api/user/auth/refresh', { method: 'POST', credentials: 'include' }).then(r => r.json()).then(res => console.log('HCNSEC_TOKEN=' + res.data?.access_token));`
-    );
-    log(`[${this.name}] 3. 将打印出的 HCNSEC_TOKEN=... 复制写入项目根目录的 .env 文件；`);
-    log(`[${this.name}] 4. 写入后日常签到将 100% 走纯后台 API 直连，再无任何验证码拦截！`);
+    log(`[${this.name}] 📌 遇到 Cloudflare 提示【验证失败 故障排除】时：`);
+    log(`[${this.name}] 👉 推荐使用极速通道（自动唤起日常默认浏览器并一键保存 Token）：`);
+    log(`[${this.name}]    node index.js --setup hcnsec --system`);
     log(
       `[${this.name}] --------------------------------------------------------------------------------`
     );

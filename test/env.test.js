@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { loadEnv } = require('../core/env');
+const { loadEnv, updateEnv } = require('../core/env');
 
 test('EnvLoader (core/env.js)', async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-test-'));
@@ -46,5 +46,23 @@ test('EnvLoader (core/env.js)', async (t) => {
     assert.doesNotThrow(() => {
       loadEnv('/non/existent/path/.env.none');
     });
+  });
+
+  await t.test('updateEnv sets new variables and updates existing ones', () => {
+    const envFile = path.join(tmpDir, '.env.update');
+    fs.writeFileSync(envFile, 'INITIAL_KEY=first_val\n# Some note\n');
+
+    // Update existing key
+    updateEnv('INITIAL_KEY', 'second_val', envFile);
+    assert.equal(process.env.INITIAL_KEY, 'second_val');
+
+    // Add new key
+    updateEnv('NEW_KEY', 'created_val', envFile);
+    assert.equal(process.env.NEW_KEY, 'created_val');
+
+    const fileContent = fs.readFileSync(envFile, 'utf-8');
+    assert.ok(fileContent.includes('INITIAL_KEY=second_val'));
+    assert.ok(fileContent.includes('NEW_KEY=created_val'));
+    assert.ok(fileContent.includes('# Some note'));
   });
 });

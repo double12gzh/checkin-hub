@@ -53,4 +53,8 @@ test('HcnsecPlugin Contract & Unit Tests', async (t) => {
     const noMatch = plugin.findTodayCheckin(mockLogs, '2099/1/1', PageHelper);
     assert.equal(noMatch, null);
   });
+
+  await t.test('implements onSystemSetup method', () => {
+    assert.equal(typeof plugin.onSystemSetup, 'function');
+  });
 });

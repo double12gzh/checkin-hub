@@ -206,6 +206,23 @@ class BrowserManager {
    */
   async execute(plugin, action = 'checkin', runtimeOptions = {}) {
     const isSetup = action === 'setup';
+
+    // 若处于 setup 模式且指定了 --system 参数，且插件支持 onSystemSetup，则优先走系统默认浏览器免驱动流程
+    if (isSetup && runtimeOptions.isSystem && typeof plugin.onSystemSetup === 'function') {
+      const log = (msg) => this.log(`[${plugin.name}] ${msg}`);
+      try {
+        const result = await plugin.onSystemSetup({
+          log,
+          helper: PageHelper,
+          options: runtimeOptions,
+        });
+        return result || { success: true, message: 'System setup completed successfully' };
+      } catch (err) {
+        this.log(`[${plugin.name}] 错误: ${err.message}`);
+        return { success: false, message: err.message, error: err };
+      }
+    }
+
     const headless = this.debug ? false : !isSetup;
     const userDataDir = this.resolveUserDataDir(plugin);
     const stealthMeta = this.resolveStealthMeta();

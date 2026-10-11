@@ -35,7 +35,43 @@ function loadEnv(envPath) {
   }
 }
 
+/**
+ * Set or update an environment variable in .env file and process.env.
+ * Preserves comments and other variable lines.
+ * @param {string} key
+ * @param {string} val
+ * @param {string} [envPath]
+ */
+function updateEnv(key, val, envPath) {
+  const target = envPath || path.resolve(__dirname, '..', '.env');
+  let content = '';
+  if (fs.existsSync(target)) {
+    content = fs.readFileSync(target, 'utf-8');
+  }
+
+  const lines = content ? content.split('\n') : [];
+  let replaced = false;
+  const newLines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(`${key}=`)) {
+      replaced = true;
+      return `${key}=${val}`;
+    }
+    return line;
+  });
+
+  if (!replaced) {
+    if (newLines.length > 0 && newLines[newLines.length - 1].trim() !== '') {
+      newLines.push('');
+    }
+    newLines.push(`${key}=${val}`);
+  }
+
+  fs.writeFileSync(target, newLines.join('\n'), 'utf-8');
+  process.env[key] = val;
+}
+
 // Auto-load on require
 loadEnv();
 
-module.exports = { loadEnv };
+module.exports = { loadEnv, updateEnv };
