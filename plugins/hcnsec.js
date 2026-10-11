@@ -59,7 +59,25 @@ class HcnsecPlugin extends BasePlugin {
     // 自动填入账号密码并勾选协议
     await this.fillLoginForm(page, log);
 
-    log(`[${this.name}] 💡 请在浏览器中点击【请验证您是真人】复选框完成人机验证...`);
+    log(`[${this.name}] 💡 请在弹出的浏览器中点击【请验证您是真人】复选框完成人机验证...`);
+    log(
+      `[${this.name}] --------------------------------------------------------------------------------`
+    );
+    log(
+      `[${this.name}] 📌 遇到 Cloudflare 提示【验证失败 故障排除】时的推荐解法（免人机极速方案）：`
+    );
+    log(
+      `[${this.name}] 1. 直接在日常普通浏览器（Chrome/Safari）中登录 https://api.hcnsec.cn/sign-in`
+    );
+    log(`[${this.name}] 2. 登录进入控制台后，按 F12 打开 Console 控制台执行以下单行命令：`);
+    log(
+      `[${this.name}]    fetch('/api/user/auth/refresh', { method: 'POST', credentials: 'include' }).then(r => r.json()).then(res => console.log('HCNSEC_TOKEN=' + res.data?.access_token));`
+    );
+    log(`[${this.name}] 3. 将打印出的 HCNSEC_TOKEN=... 复制写入项目根目录的 .env 文件；`);
+    log(`[${this.name}] 4. 写入后日常签到将 100% 走纯后台 API 直连，再无任何验证码拦截！`);
+    log(
+      `[${this.name}] --------------------------------------------------------------------------------`
+    );
     log(`[${this.name}] 等待登录完成并跳转至控制台或主页 (${this.url})...`);
 
     // 监听 Turnstile 验证通过后自动点击提交
@@ -83,22 +101,33 @@ class HcnsecPlugin extends BasePlugin {
     };
     tryAutoSubmit();
 
-    await page.waitForURL(
-      (url) => {
-        const p = url.pathname;
-        if (p.includes('/login') || p.includes('/sign-in')) return false;
-        return (
-          url.href.startsWith(this.url) ||
-          p.includes('/console') ||
-          p.includes('/dashboard') ||
-          p.includes('/token') ||
-          p.includes('/profile') ||
-          p === '/'
-        );
-      },
-      { timeout: 300000, waitUntil: 'domcontentloaded' }
-    );
-    log(`[${this.name}] 登录成功！会话已自动保存至 Profile。`);
+    try {
+      await page.waitForURL(
+        (url) => {
+          const p = url.pathname;
+          if (p.includes('/login') || p.includes('/sign-in')) return false;
+          return (
+            url.href.startsWith(this.url) ||
+            p.includes('/console') ||
+            p.includes('/dashboard') ||
+            p.includes('/token') ||
+            p.includes('/profile') ||
+            p === '/'
+          );
+        },
+        { timeout: 300000, waitUntil: 'domcontentloaded' }
+      );
+      log(`[${this.name}] 登录成功！会话已自动保存至 Profile。`);
+    } catch (err) {
+      log(`[${this.name}] 浏览器登录未完成或已关闭。`);
+      log(`[${this.name}] 💡 提示：若受 Cloudflare 拦截，推荐直接使用 Token 方式：`);
+      log(`[${this.name}]    在普通浏览器登录后按 F12 控制台运行：`);
+      log(
+        `[${this.name}]    fetch('/api/user/auth/refresh', { method: 'POST', credentials: 'include' }).then(r => r.json()).then(res => console.log('HCNSEC_TOKEN=' + res.data?.access_token));`
+      );
+      log(`[${this.name}]    并将得到的 HCNSEC_TOKEN=... 写入 .env 文件即可！`);
+      throw err;
+    }
   }
 
   /**
@@ -337,7 +366,7 @@ class HcnsecPlugin extends BasePlugin {
 
     if (!apiResult?.selfData?.success) {
       throw new Error(
-        'HCNSEC 登录失败（Cloudflare Turnstile 人机验证拦截）。请运行 "node index.js --setup hcnsec" 在弹出的浏览器中完成首次人机验证与登录！'
+        'HCNSEC 登录失败（Cloudflare Turnstile 人机验证拦截）。推荐直接在普通浏览器登录后获取 Token 并填入 .env 的 HCNSEC_TOKEN=...，或运行 "node index.js --setup hcnsec" 重新登录！'
       );
     }
 
