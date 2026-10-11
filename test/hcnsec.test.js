@@ -11,7 +11,7 @@ test('HcnsecPlugin Contract & Unit Tests', async (t) => {
     assert.equal(plugin.name, 'HCNSEC');
     assert.equal(plugin.enabled, true);
     assert.equal(plugin.url, 'https://api.hcnsec.cn/console');
-    assert.equal(plugin.loginUrl, 'https://api.hcnsec.cn/login');
+    assert.equal(plugin.loginUrl, 'https://api.hcnsec.cn/sign-in');
   });
 
   await t.test('calculateBalance parses quota correctly from selfData', () => {

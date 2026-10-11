@@ -9,21 +9,80 @@ class HcnsecPlugin extends BasePlugin {
       name: 'HCNSEC',
       description: 'HCNSEC API 每日自动签到与余额查询',
       url: 'https://api.hcnsec.cn/console',
-      loginUrl: 'https://api.hcnsec.cn/login',
+      loginUrl: 'https://api.hcnsec.cn/sign-in',
       enabled: true,
     });
   }
 
   /**
-   * 交互式 Setup 模式：支持在弹出的浏览器中手动完成登录与 Turnstile 人机验证
+   * 自动填充登录表单（账号、密码与协议勾选）
+   */
+  async fillLoginForm(page, log) {
+    const username = process.env.HCNSEC_USERNAME;
+    const password = process.env.HCNSEC_PASSWORD;
+
+    const usernameInput = page.locator('input[name="username"]').first();
+    await usernameInput.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+
+    if (username && (await usernameInput.isVisible().catch(() => false))) {
+      await usernameInput.fill(username).catch(() => {});
+    }
+
+    const passwordInput = page.locator('input[name="password"]').first();
+    if (password && (await passwordInput.isVisible().catch(() => false))) {
+      await passwordInput.fill(password).catch(() => {});
+    }
+
+    // 自动勾选服务条款复选框
+    const agreeCheckbox = page.locator('[role="checkbox"]').first();
+    if (await agreeCheckbox.isVisible().catch(() => false)) {
+      const isChecked = (await agreeCheckbox.getAttribute('aria-checked')) === 'true';
+      if (!isChecked) {
+        await agreeCheckbox.click().catch(() => {});
+      }
+    }
+
+    if (username && password) {
+      log('👉 账号、密码及服务条款已自动预填完成！');
+    }
+  }
+
+  /**
+   * 交互式 Setup 模式：支持在弹出的浏览器中完成登录与 Turnstile 人机验证
    */
   async onSetup(context) {
     const { page, log } = context;
-    log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成登录与 Turnstile 人机验证...`);
+    log(`[${this.name}] Setup 模式：正在启动浏览器...`);
     log(`[${this.name}] 正在导航至登录页: ${this.loginUrl}`);
     await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
+    // 自动填入账号密码并勾选协议
+    await this.fillLoginForm(page, log);
+
+    log(`[${this.name}] 💡 请在浏览器中点击【请验证您是真人】复选框完成人机验证...`);
     log(`[${this.name}] 等待登录完成并跳转至控制台或主页 (${this.url})...`);
+
+    // 监听 Turnstile 验证通过后自动点击提交
+    const submitBtn = page.locator('form button[type="submit"]').first();
+    const tryAutoSubmit = async () => {
+      try {
+        await page.waitForFunction(
+          () => {
+            const input = globalThis.document?.querySelector('input[name="cf-turnstile-response"]');
+            return !!(input && input.value && input.value.length > 0);
+          },
+          { timeout: 60000 }
+        );
+        if (await submitBtn.isEnabled().catch(() => false)) {
+          log(`[${this.name}] 检测到 Turnstile 验证已完成，自动点击【登录】提交...`);
+          await submitBtn.click().catch(() => {});
+        }
+      } catch (e) {
+        // 用户可能手动点击登录，忽略自动提交超时
+      }
+    };
+    tryAutoSubmit();
+
     await page.waitForURL(
       (url) => {
         const p = url.pathname;
@@ -166,41 +225,23 @@ class HcnsecPlugin extends BasePlugin {
       await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await helper.dismissModals(page);
 
-      const usernameInput = page.locator('input[name="username"]').first();
-      await usernameInput.waitFor({ state: 'visible', timeout: 15000 });
-      await usernameInput.fill(username);
-
-      const passwordInput = page.locator('input[name="password"]').first();
-      await passwordInput.waitFor({ state: 'visible', timeout: 15000 });
-      await passwordInput.fill(password);
-
-      // 同意服务条款勾选框（若存在）
-      const legalCheckbox = page.locator('#legal-consent').first();
-      if (await legalCheckbox.count()) {
-        const isChecked = await legalCheckbox.isChecked().catch(() => false);
-        if (!isChecked) {
-          await legalCheckbox.check({ force: true }).catch(() => {});
-        }
-      }
+      await this.fillLoginForm(page, log);
 
       log(`[${this.name}] 等待 Cloudflare Turnstile 验证就绪...`);
-      // 等待 Turnstile 隐藏 input 产生 token，或最多等待 10s
       await page
         .waitForFunction(
           () => {
             const input = globalThis.document?.querySelector('input[name="cf-turnstile-response"]');
-            return input && input.value && input.value.length > 0;
+            return !!(input && input.value && input.value.length > 0);
           },
           { timeout: 10000 }
         )
         .catch(() => false);
 
-      const submitBtn = page
-        .locator('button:has-text("Sign in"), button:has-text("登录"), button[type="submit"]')
-        .first();
-      await submitBtn.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+      const submitBtn = page.locator('form button[type="submit"]').first();
+      await submitBtn.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
 
-      if (await submitBtn.isVisible().catch(() => false)) {
+      if (await submitBtn.isEnabled().catch(() => false)) {
         log(`[${this.name}] 点击登录提交按钮...`);
         await submitBtn.click().catch(() => {});
       }
