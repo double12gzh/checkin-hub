@@ -203,6 +203,70 @@ class HcnsecPlugin extends BasePlugin {
   async onCheckin({ page, log, helper }) {
     const todayStr = helper.getCSTDateString();
 
+    // 0. Super Fast-Path: 若 .env 中配置了 HCNSEC_TOKEN 或 HCNSEC_COOKIE，直接无缝免浏览器打卡
+    const envToken = process.env.HCNSEC_TOKEN || process.env.HCNSEC_ACCESS_TOKEN;
+    const envCookie = process.env.HCNSEC_COOKIE;
+
+    if (envToken || envCookie) {
+      log(`[${this.name}] 检测到 .env 中已配置 Token/Cookie，尝试通过直连凭据签到...`);
+      try {
+        const authHeaders = {
+          'Content-Type': 'application/json',
+          ...(envToken ? { Authorization: `Bearer ${envToken}` } : {}),
+          ...(envCookie ? { Cookie: envCookie } : {}),
+        };
+
+        const rSelf = await fetch('https://api.hcnsec.cn/api/user/self', { headers: authHeaders });
+        const selfData = await rSelf.json().catch(() => null);
+
+        if (selfData?.success) {
+          const rCheckin = await fetch('https://api.hcnsec.cn/api/user/checkin', {
+            method: 'POST',
+            headers: authHeaders,
+          });
+          const checkinData = await rCheckin.json().catch(() => null);
+
+          let logItems = [];
+          try {
+            const rLog = await fetch('https://api.hcnsec.cn/api/log/self?p=1&page_size=10&type=4', {
+              headers: authHeaders,
+            });
+            const logData = await rLog.json().catch(() => null);
+            if (logData?.data?.items && Array.isArray(logData.data.items)) {
+              logItems = logData.data.items;
+            }
+          } catch (e) {}
+
+          const balance = this.calculateBalance(selfData);
+          let message = '今日已签到';
+          const todayCheckin = this.findTodayCheckin(logItems, todayStr, helper);
+
+          if (checkinData?.success) {
+            message = checkinData.message || '签到成功';
+          } else if (todayCheckin) {
+            const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
+            message = `签到已确认: ${todayCheckin.content} (${checkinTime})`;
+          } else if (checkinData?.message) {
+            const msg = checkinData.message;
+            if (
+              msg.includes('已签到') ||
+              msg.includes('重复') ||
+              msg.includes('already') ||
+              msg.includes('已经签到')
+            ) {
+              message = msg;
+            } else {
+              throw new Error(`HCNSEC 签到失败: ${msg}`);
+            }
+          }
+
+          return { success: true, message, balance };
+        }
+      } catch (err) {
+        log(`[${this.name}] 直连凭据验证失败: ${err.message}，回退至浏览器会话流程...`);
+      }
+    }
+
     // 1. Fast-Path: 优先检查当前持久化会话是否有效
     log(`[${this.name}] 正在检查当前会话与登录状态...`);
     await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
