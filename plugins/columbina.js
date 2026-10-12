@@ -4,13 +4,14 @@ const QUOTA_PER_USD = 500_000;
 
 class ColumbinaPlugin extends BasePlugin {
   constructor() {
+    const baseUrl = process.env.COLUMBINA_URL || 'https://newapi.columbina.eu.org';
     super({
       id: 'columbina',
       name: 'Columbina',
       description: 'Columbina New API 每日自动签到与额度查询',
-      url: 'https://newapi.columbina.eu.org/profile',
-      loginUrl: 'https://newapi.columbina.eu.org/sign-in',
-      enabled: true,
+      url: `${baseUrl}/profile`,
+      loginUrl: `${baseUrl}/sign-in`,
+      enabled: process.env.COLUMBINA_ENABLED ? process.env.COLUMBINA_ENABLED === 'true' : true,
     });
   }
 
@@ -21,7 +22,22 @@ class ColumbinaPlugin extends BasePlugin {
     const { page, log } = context;
     log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成登录...`);
     log(`[${this.name}] 正在导航至登录页: ${this.loginUrl}`);
-    await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    try {
+      await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } catch (netErr) {
+      if (
+        netErr.message.includes('ERR_CONNECTION_CLOSED') ||
+        netErr.message.includes('ERR_CONNECTION_REFUSED') ||
+        netErr.message.includes('ERR_SSL_') ||
+        netErr.message.includes('ERR_NAME_NOT_RESOLVED')
+      ) {
+        throw new Error(
+          `Columbina 登录页面无法访问（上游网络/SSL连接中断，疑似站点已下线或域名变更）。若站点更换域名，请在 .env 中设置 COLUMBINA_URL=https://...。`,
+          { cause: netErr }
+        );
+      }
+      throw netErr;
+    }
 
     log(`[${this.name}] 等待登录完成并跳转至主页或控制台...`);
     await page.waitForURL(
@@ -104,7 +120,22 @@ class ColumbinaPlugin extends BasePlugin {
         );
       }
 
-      await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      try {
+        await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } catch (netErr) {
+        if (
+          netErr.message.includes('ERR_CONNECTION_CLOSED') ||
+          netErr.message.includes('ERR_CONNECTION_REFUSED') ||
+          netErr.message.includes('ERR_SSL_') ||
+          netErr.message.includes('ERR_NAME_NOT_RESOLVED')
+        ) {
+          throw new Error(
+            `Columbina 站点服务不可用（上游网关连接已关闭或 SSL 握手失败，疑似站点已下线或域名变更）。若有可用新域名，可在 .env 中配置 COLUMBINA_URL=https://...；若需暂时跳过该站点，可在 .env 中设置 COLUMBINA_ENABLED=false。`,
+            { cause: netErr }
+          );
+        }
+        throw netErr;
+      }
       await helper.dismissModals(page);
 
       const usernameInput = page.locator('input[name="username"]').first();

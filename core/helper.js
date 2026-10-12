@@ -496,7 +496,9 @@ class PageHelper {
       .evaluate((docParam) => {
         const d = docParam || document;
         const target =
-          d.querySelector('.cf-turnstile') || d.querySelector('iframe[src*="turnstile"]');
+          d.querySelector('.cf-turnstile') ||
+          d.querySelector('iframe[src*="turnstile"]') ||
+          d.querySelector('iframe[src*="challenges.cloudflare.com"]');
         if (!target) return;
         try {
           target.dispatchEvent(
@@ -519,6 +521,29 @@ class PageHelper {
         } catch (_) {}
       })
       .catch(() => {});
+
+    try {
+      if (typeof page.frames === 'function') {
+        const turnstileFrame = page
+          .frames()
+          .find(
+            (f) =>
+              f.url &&
+              (f.url().includes('challenges.cloudflare.com') || f.url().includes('turnstile'))
+          );
+        if (turnstileFrame && typeof turnstileFrame.frameElement === 'function') {
+          const frameEl = await turnstileFrame.frameElement().catch(() => null);
+          if (frameEl) {
+            const box = await frameEl.boundingBox().catch(() => null);
+            if (box && box.width > 0 && box.height > 0) {
+              await frameEl
+                .click({ position: { x: Math.min(30, box.width / 2), y: box.height / 2 } })
+                .catch(() => {});
+            }
+          }
+        }
+      }
+    } catch (_) {}
 
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {

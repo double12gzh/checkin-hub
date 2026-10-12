@@ -19,8 +19,14 @@ class AgentRouterPlugin extends BasePlugin {
    */
   async fetchUserData(page) {
     return await page.evaluate(async () => {
-      const userStr = localStorage.getItem('user');
-      const userObj = userStr ? JSON.parse(userStr) : {};
+      let userStr = null;
+      try {
+        userStr = localStorage.getItem('user');
+      } catch (_) {}
+      let userObj = {};
+      try {
+        userObj = userStr ? JSON.parse(userStr) : {};
+      } catch (_) {}
       const headers = userObj.id ? { 'New-Api-User': String(userObj.id) } : {};
 
       let selfData = null;
@@ -45,17 +51,80 @@ class AgentRouterPlugin extends BasePlugin {
     });
   }
 
+  /**
+   * Direct API 极速通道：通过持久化 Cookie 直接完成预检与额度查询
+   */
+  async onDirectApiCheckin({ log, session, helper }) {
+    if (!session || !session.cookies) return null;
+
+    const todayStr = helper.getCSTDateString();
+    const baseUrl = new URL(this.url).origin;
+
+    try {
+      if (log) log(`[${this.name}] 正在通过 Direct API 检查今日打卡状态...`);
+
+      const rLog = await fetch(`${baseUrl}/api/log/self?p=1&page_size=10&type=4`, {
+        headers: {
+          Cookie: session.cookies,
+          ...session.headers,
+        },
+      });
+
+      if (rLog.status === 401 || rLog.status === 403) {
+        return null;
+      }
+
+      const logData = await rLog.json().catch(() => null);
+      const logItems =
+        logData?.data?.items && Array.isArray(logData.data.items) ? logData.data.items : [];
+      const todayCheckin = this.findTodayCheckin(logItems, todayStr, helper);
+
+      if (todayCheckin) {
+        let balance = null;
+        try {
+          const rSelf = await fetch(`${baseUrl}/api/user/self`, {
+            headers: {
+              Cookie: session.cookies,
+              ...session.headers,
+            },
+          });
+          const selfData = await rSelf.json();
+          balance = this.calculateBalance(selfData);
+        } catch (_) {}
+
+        const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
+        return {
+          success: true,
+          message: `签到已确认: ${todayCheckin.content} (${checkinTime})`,
+          balance,
+        };
+      }
+
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   findTodayCheckin(logItems, todayStr, helper) {
     if (!logItems || logItems.length === 0) return null;
-    const todayISO = helper.getCSTISODateString ? helper.getCSTISODateString() : todayStr;
+    const targetTimestamp =
+      todayStr && !Number.isNaN(Date.parse(todayStr)) ? new Date(todayStr).getTime() : undefined;
+    const todayISO = helper.getCSTISODateString
+      ? helper.getCSTISODateString(targetTimestamp)
+      : todayStr;
+    const normalizedToday = todayStr ? todayStr.replace(/\//g, '-') : '';
     for (const item of logItems) {
       if (item.created_at) {
         const itemDate = helper.getCSTDateString(item.created_at * 1000);
         const itemDateISO = helper.getCSTISODateString
           ? helper.getCSTISODateString(item.created_at * 1000)
           : itemDate;
+        const normalizedItem = itemDate ? itemDate.replace(/\//g, '-') : '';
         if (
-          (itemDate === todayStr || itemDateISO === todayISO) &&
+          (itemDate === todayStr ||
+            itemDateISO === todayISO ||
+            normalizedItem === normalizedToday) &&
           (item.content?.includes('签到') || item.content?.includes('每日'))
         ) {
           return item;
@@ -83,7 +152,10 @@ class AgentRouterPlugin extends BasePlugin {
     await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
     await helper.dismissModals(page);
 
-    let checkResult = await this.fetchUserData(page);
+    let checkResult = { selfData: null, logItems: [] };
+    if (page.url() && !page.url().includes('about:blank')) {
+      checkResult = await this.fetchUserData(page);
+    }
     let todayCheckin = this.findTodayCheckin(checkResult.logItems, todayStr, helper);
 
     if (todayCheckin) {
