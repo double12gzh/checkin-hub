@@ -4,3 +4,4 @@ screenshots/
 package-lock.json
 *.log
 backup/
+.superpowers/
