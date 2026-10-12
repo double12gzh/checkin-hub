@@ -2,6 +2,7 @@ const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 const { PageHelper } = require('./helper');
+const { BasePlugin } = require('./base-plugin');
 
 class BrowserManager {
   constructor(options = {}) {
@@ -231,6 +232,7 @@ class BrowserManager {
       !isSetup &&
       !runtimeOptions.forceBrowser &&
       typeof plugin.onDirectApiCheckin === 'function' &&
+      plugin.onDirectApiCheckin !== BasePlugin.prototype.onDirectApiCheckin &&
       fs.existsSync(statePath)
     ) {
       const session = PageHelper.loadSessionFromState(statePath);

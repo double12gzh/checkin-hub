@@ -80,7 +80,7 @@ class AnyRouterPlugin extends BasePlugin {
     if (!session || !session.cookies) return null;
 
     const todayStr = helper.getCSTDateString();
-    const baseUrl = 'https://anyrouter.top';
+    const baseUrl = new URL(this.url).origin;
 
     try {
       if (log) log(`[${this.name}] 正在通过 Direct API 检查今日打卡状态...`);
@@ -133,6 +133,11 @@ class AnyRouterPlugin extends BasePlugin {
 
   findTodayCheckin(logItems, todayStr, helper) {
     if (!logItems || logItems.length === 0) return null;
+    const targetTimestamp =
+      todayStr && !Number.isNaN(Date.parse(todayStr)) ? new Date(todayStr).getTime() : undefined;
+    const todayISO = helper.getCSTISODateString
+      ? helper.getCSTISODateString(targetTimestamp)
+      : todayStr;
     const normalizedToday = todayStr ? todayStr.replace(/\//g, '-') : '';
     for (const item of logItems) {
       if (item.created_at) {
@@ -143,7 +148,7 @@ class AnyRouterPlugin extends BasePlugin {
         const normalizedItem = itemDate ? itemDate.replace(/\//g, '-') : '';
         if (
           (itemDate === todayStr ||
-            itemDateISO === todayStr ||
+            itemDateISO === todayISO ||
             normalizedItem === normalizedToday) &&
           (item.content?.includes('签到') || item.content?.includes('每日'))
         ) {
