@@ -531,6 +531,90 @@ class PageHelper {
       'Turnstile 验证码未在限定时间内完成，可能受限于当前网络 IP 信誉，请运行 node index.js --setup <id> 进行一次交互式人工验证。'
     );
   }
+
+  /**
+   * Save browser persistent storage state (cookies + localStorage) to JSON.
+   * @param {import('playwright').BrowserContext} browser
+   * @param {string} statePath
+   * @returns {Promise<boolean>}
+   */
+  static async saveStorageState(browser, statePath) {
+    if (!browser || typeof browser.storageState !== 'function' || !statePath) {
+      return false;
+    }
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dir = path.dirname(statePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      await browser.storageState({ path: statePath });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Load and parse storage state JSON into headers and cookie string for fetch.
+   * @param {string} statePath
+   * @returns {{ cookies: string, headers: Record<string, string>, rawState: Object } | null}
+   */
+  static loadSessionFromState(statePath) {
+    if (!statePath) return null;
+    const fs = require('fs');
+    if (!fs.existsSync(statePath)) return null;
+
+    try {
+      const content = fs.readFileSync(statePath, 'utf-8');
+      const rawState = JSON.parse(content);
+      const cookiesList = Array.isArray(rawState.cookies) ? rawState.cookies : [];
+
+      const cookieHeader = cookiesList
+        .filter((c) => c && c.name && typeof c.value !== 'undefined')
+        .map((c) => `${c.name}=${c.value}`)
+        .join('; ');
+
+      const headers = {};
+      if (cookieHeader) {
+        headers['Cookie'] = cookieHeader;
+      }
+
+      const origins = Array.isArray(rawState.origins) ? rawState.origins : [];
+      for (const org of origins) {
+        const items = Array.isArray(org.localStorage) ? org.localStorage : [];
+        for (const item of items) {
+          if (!item || !item.name || !item.value) continue;
+          if (item.name === 'user') {
+            try {
+              const userObj = JSON.parse(item.value);
+              if (userObj.id) {
+                headers['New-Api-User'] = String(userObj.id);
+              }
+              if (userObj.token && !headers['Authorization']) {
+                headers['Authorization'] = `Bearer ${userObj.token}`;
+              }
+            } catch (_) {}
+          }
+          if (
+            (item.name === 'token' || item.name === 'access_token') &&
+            !headers['Authorization']
+          ) {
+            headers['Authorization'] = `Bearer ${item.value.replace(/^Bearer\s+/i, '')}`;
+          }
+        }
+      }
+
+      return {
+        cookies: cookieHeader,
+        headers,
+        rawState,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 module.exports = { PageHelper };

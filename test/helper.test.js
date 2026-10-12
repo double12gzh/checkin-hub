@@ -165,3 +165,57 @@ test('PageHelper - Turnstile Token Resolution', async (t) => {
     }
   );
 });
+
+test('PageHelper - StorageState & Session Management', async (t) => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'checkin-state-test-'));
+  const testStatePath = path.join(tmpDir, 'state.json');
+
+  t.after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  await t.test('loadSessionFromState returns null when file does not exist', () => {
+    const session = PageHelper.loadSessionFromState(path.join(tmpDir, 'nonexistent.json'));
+    assert.equal(session, null);
+  });
+
+  await t.test(
+    'saveStorageState and loadSessionFromState work seamlessly with mock browser',
+    async () => {
+      const mockStorage = {
+        cookies: [
+          { name: 'session', value: 'sess-abc-123', domain: 'example.com', path: '/' },
+          { name: '_token', value: 'tok-xyz-789', domain: 'example.com', path: '/' },
+        ],
+        origins: [
+          {
+            origin: 'https://example.com',
+            localStorage: [
+              { name: 'user', value: JSON.stringify({ id: 42, username: 'testuser' }) },
+              { name: 'token', value: 'bearer-jwt-token' },
+            ],
+          },
+        ],
+      };
+
+      const mockBrowser = {
+        storageState: async ({ path: savePath }) => {
+          fs.writeFileSync(savePath, JSON.stringify(mockStorage, null, 2));
+        },
+      };
+
+      const saved = await PageHelper.saveStorageState(mockBrowser, testStatePath);
+      assert.equal(saved, true);
+      assert.ok(fs.existsSync(testStatePath));
+
+      const session = PageHelper.loadSessionFromState(testStatePath);
+      assert.ok(session !== null);
+      assert.equal(session.cookies, 'session=sess-abc-123; _token=tok-xyz-789');
+      assert.equal(session.headers['New-Api-User'], '42');
+      assert.equal(session.headers['Authorization'], 'Bearer bearer-jwt-token');
+    }
+  );
+});
