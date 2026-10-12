@@ -223,8 +223,47 @@ class BrowserManager {
       }
     }
 
-    const headless = this.debug ? false : !isSetup;
     const userDataDir = this.resolveUserDataDir(plugin);
+    const statePath = path.join(userDataDir, 'state.json');
+
+    // Layer 1: Direct API 极速通道 (Fast-Path)
+    if (
+      !isSetup &&
+      !runtimeOptions.forceBrowser &&
+      typeof plugin.onDirectApiCheckin === 'function' &&
+      fs.existsSync(statePath)
+    ) {
+      const session = PageHelper.loadSessionFromState(statePath);
+      if (session) {
+        const log = (msg) => this.log(`[${plugin.name}] ${msg}`);
+        try {
+          const directResult = await plugin.onDirectApiCheckin({
+            log,
+            helper: PageHelper,
+            session,
+            options: runtimeOptions,
+          });
+
+          if (directResult && directResult.success) {
+            this.log(
+              `[${plugin.name}] ⚡ Direct API 极速签到完成: ${directResult.message || 'OK'}${
+                directResult.balance ? ` (余额: ${directResult.balance})` : ''
+              }`
+            );
+            return directResult;
+          }
+          this.log(
+            `[${plugin.name}] Direct API 返回未完成或需验证，平滑升轨至 Playwright 浏览器兜底...`
+          );
+        } catch (directErr) {
+          this.log(
+            `[${plugin.name}] Direct API 触发质询或异常 (${directErr.message})，转入 Playwright 浏览器兜底...`
+          );
+        }
+      }
+    }
+
+    const headless = this.debug ? false : !isSetup;
     const stealthMeta = this.resolveStealthMeta();
 
     this.log(
@@ -257,9 +296,13 @@ class BrowserManager {
     try {
       if (isSetup) {
         await plugin.onSetup(context);
+        await PageHelper.saveStorageState(browser, statePath).catch(() => {});
         return { success: true, message: 'Setup completed successfully' };
       } else {
         const result = await plugin.onCheckin(context);
+        if (result && result.success) {
+          await PageHelper.saveStorageState(browser, statePath).catch(() => {});
+        }
         this.log(
           `[${plugin.name}] 执行完成: ${result.message || 'OK'}${result.balance ? ` (余额: ${result.balance})` : ''}`
         );
