@@ -99,6 +99,13 @@ for (const file of pluginFiles) {
   } else {
     logPass(`Implements onCheckin() hook`);
   }
+
+  // Contract: Optional onDirectApiCheckin must be a function if defined
+  if (instance.onDirectApiCheckin && typeof instance.onDirectApiCheckin !== 'function') {
+    logFail(`Plugin onDirectApiCheckin must be a function if implemented`);
+  } else if (instance.onDirectApiCheckin !== BasePlugin.prototype.onDirectApiCheckin) {
+    logPass(`Implements onDirectApiCheckin() hook`);
+  }
 }
 
 console.log('\n🔍 [2/3] Scanning for Code Patterns and Anti-Patterns...');

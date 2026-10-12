@@ -51,6 +51,20 @@ class BasePlugin {
   }
 
   /**
+   * [Optional] Direct API check-in fast-path.
+   * When implemented and valid cached session exists, BrowserManager runs this first.
+   * Return { success: true, message, balance? } on success, or null/throw on failure.
+   * @param {Object} _context
+   * @param {Function} _context.log
+   * @param {typeof import('./helper').PageHelper} _context.helper
+   * @param {{ cookies: string, headers: Record<string, string>, rawState: Object }} _context.session
+   * @returns {Promise<{ success: boolean, message: string, balance?: string } | null>}
+   */
+  async onDirectApiCheckin(_context) {
+    return null;
+  }
+
+  /**
    * Core check-in execution hook (must be implemented by subclasses).
    * @param {Object} context - { page, browser, log, helper, options }
    * @returns {Promise<{ success: boolean, message: string, balance?: string, extra?: any }>}

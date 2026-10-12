@@ -44,4 +44,11 @@ test('BasePlugin Contract & Default Behaviors', async (t) => {
       }
     );
   });
+
+  await t.test('onDirectApiCheckin returns null by default on BasePlugin instance', async () => {
+    const plugin = new BasePlugin({ id: 'dummy', name: 'Dummy' });
+    assert.equal(typeof plugin.onDirectApiCheckin, 'function');
+    const result = await plugin.onDirectApiCheckin({});
+    assert.equal(result, null);
+  });
 });
