@@ -63,3 +63,105 @@ test('PageHelper - DOM and UI utilities with mock page', async (t) => {
     assert.equal(typeof PageHelper.openSystemBrowser, 'function');
   });
 });
+
+test('PageHelper - Cloudflare Challenge Detection', async (t) => {
+  await t.test(
+    'detectCloudflareChallenge detects strong marker and marks isChallenge true',
+    async () => {
+      const mockPage = {
+        evaluate: async (fn) => {
+          // Mock evaluate executing against browser window
+          const mockWindow = {
+            _cf_chl_opt: {},
+            location: { href: 'https://example.com' },
+            document: {
+              title: 'Please Wait',
+              querySelectorAll: () => [],
+              querySelector: () => null,
+              body: { innerText: '' },
+            },
+          };
+          // Evaluate the inner function with mock DOM
+          return fn(mockWindow);
+        },
+      };
+
+      const res = await PageHelper.detectCloudflareChallenge(mockPage);
+      assert.equal(res.isChallenge, true);
+      assert.ok(res.score >= 3);
+      assert.ok(res.strong.includes('_cf_chl_opt'));
+    }
+  );
+
+  await t.test('detectCloudflareChallenge returns isChallenge false on normal page', async () => {
+    const mockPage = {
+      evaluate: async (fn) => {
+        const mockWindow = {
+          location: { href: 'https://example.com/console' },
+          document: {
+            title: 'User Console',
+            querySelectorAll: () => [],
+            querySelector: () => null,
+            body: { innerText: 'Welcome back' },
+          },
+        };
+        return fn(mockWindow);
+      },
+    };
+
+    const res = await PageHelper.detectCloudflareChallenge(mockPage);
+    assert.equal(res.isChallenge, false);
+    assert.equal(res.score, 0);
+  });
+
+  await t.test('waitForCloudflareBypass returns true immediately if not challenged', async () => {
+    const mockPage = {
+      evaluate: async () => ({ isChallenge: false, score: 0, strong: [], medium: [], weak: [] }),
+    };
+    const passed = await PageHelper.waitForCloudflareBypass(mockPage, {
+      timeoutMs: 1000,
+      pollIntervalMs: 50,
+    });
+    assert.equal(passed, true);
+  });
+});
+
+test('PageHelper - Turnstile Token Resolution', async (t) => {
+  await t.test(
+    'resolveTurnstileToken extracts token when present in cf-turnstile-response',
+    async () => {
+      const mockPage = {
+        locator: (_sel) => ({
+          first: () => ({
+            isVisible: async () => true,
+            click: async () => {},
+          }),
+        }),
+        evaluate: async (fn) => {
+          const mockDoc = {
+            querySelector: (sel) => {
+              if (sel === '[name="cf-turnstile-response"]') {
+                return { value: 'test-turnstile-token-12345' };
+              }
+              if (sel === '.cf-turnstile' || sel.includes('iframe')) {
+                return {
+                  dispatchEvent: () => true,
+                  click: () => {},
+                };
+              }
+              return null;
+            },
+          };
+          return fn(mockDoc);
+        },
+        waitForFunction: async () => true,
+      };
+
+      const token = await PageHelper.resolveTurnstileToken(mockPage, {
+        timeoutMs: 2000,
+        pollIntervalMs: 50,
+      });
+      assert.equal(token, 'test-turnstile-token-12345');
+    }
+  );
+});

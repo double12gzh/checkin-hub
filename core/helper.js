@@ -1,3 +1,5 @@
+/* global window, document, PointerEvent, MouseEvent */
+
 /**
  * PageHelper provides a rich toolkit for common browser automation operations.
  */
@@ -338,6 +340,196 @@ class PageHelper {
         resolve(!err);
       });
     });
+  }
+
+  /**
+   * Score-based Cloudflare challenge detection.
+   * Evaluates strong (+3), medium (+2), and weak (+1) markers in page context.
+   * @param {import('playwright').Page} page
+   * @returns {Promise<{ isChallenge: boolean, score: number, strong: string[], medium: string[], weak: string[] }>}
+   */
+  static async detectCloudflareChallenge(page) {
+    try {
+      return await page.evaluate((win) => {
+        const w = win || window;
+        const d = w.document || document;
+        let score = 0;
+        const strong = [];
+        const medium = [];
+        const weak = [];
+
+        // Strong markers (+3)
+        if (typeof w._cf_chl_opt !== 'undefined') {
+          score += 3;
+          strong.push('_cf_chl_opt');
+        }
+        const scripts = Array.from(d.querySelectorAll('script[src]') || []);
+        if (scripts.some((s) => s.src && s.src.includes('challenge-platform'))) {
+          score += 3;
+          strong.push('challenge-platform');
+        }
+        if (scripts.some((s) => s.src && s.src.includes('trace-jsch'))) {
+          score += 3;
+          strong.push('trace-jsch');
+        }
+        if (d.querySelector('form#challenge-form, form[action*="challenge"]')) {
+          score += 3;
+          strong.push('challenge-form');
+        }
+
+        // Medium markers (+2)
+        if (d.querySelector('#cf-content')) {
+          score += 2;
+          medium.push('cf-content');
+        }
+        if (d.querySelector('#cf-wrapper')) {
+          score += 2;
+          medium.push('cf-wrapper');
+        }
+        const bodyText = d.body?.innerText || '';
+        if (bodyText.includes('Error 1020') || bodyText.includes('Access denied')) {
+          score += 2;
+          medium.push('cf-error-text');
+        }
+        const href = w.location?.href || '';
+        if (href.includes('/cdn-cgi/')) {
+          score += 2;
+          medium.push('cdn-cgi-url');
+        }
+
+        // Weak markers (+1)
+        const title = (d.title || '').toLowerCase();
+        if (
+          title.includes('just a moment') ||
+          title.includes('please wait') ||
+          title.includes('attention required')
+        ) {
+          score += 1;
+          weak.push('cf-title');
+        }
+        if (d.querySelector('iframe[src*="turnstile"], .cf-turnstile')) {
+          score += 1;
+          weak.push('turnstile');
+        }
+
+        const isChallenge =
+          strong.length > 0 || (score >= 3 && (medium.length > 0 || weak.length > 0));
+        return { isChallenge, score, strong, medium, weak };
+      });
+    } catch (e) {
+      return { isChallenge: false, score: 0, strong: [], medium: [], weak: [] };
+    }
+  }
+
+  /**
+   * Wait for Cloudflare challenge bypass.
+   * Returns immediately if no challenge detected.
+   * @param {import('playwright').Page} page
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs=30000]
+   * @param {number} [options.pollIntervalMs=500]
+   * @returns {Promise<boolean>}
+   */
+  static async waitForCloudflareBypass(page, options = {}) {
+    const timeoutMs = options.timeoutMs || 30000;
+    const pollIntervalMs = options.pollIntervalMs || 500;
+
+    const initial = await this.detectCloudflareChallenge(page);
+    if (!initial.isChallenge) {
+      return true;
+    }
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, pollIntervalMs)); // ok: sleep
+      try {
+        const check = await this.detectCloudflareChallenge(page);
+        if (!check.isChallenge) {
+          return true;
+        }
+      } catch (_) {
+        // Page navigating, retry next tick
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Stimulate and extract Cloudflare Turnstile token.
+   * Supports pre-trigger clicks and user-like Pointer/Mouse events.
+   * @param {import('playwright').Page} page
+   * @param {Object} [options]
+   * @param {string} [options.preTriggerSelector]
+   * @param {number} [options.timeoutMs=25000]
+   * @param {number} [options.pollIntervalMs=300]
+   * @returns {Promise<string>}
+   */
+  static async resolveTurnstileToken(page, options = {}) {
+    const timeoutMs = options.timeoutMs || 25000;
+    const pollIntervalMs = options.pollIntervalMs || 300;
+
+    if (options.preTriggerSelector) {
+      try {
+        const trigger = page.locator(options.preTriggerSelector).first();
+        if (await trigger.isVisible().catch(() => false)) {
+          await trigger.click().catch(() => {});
+        }
+      } catch (_) {}
+    }
+
+    const readToken = async () => {
+      return await page.evaluate((docParam) => {
+        const d = docParam || document;
+        const field = d.querySelector('[name="cf-turnstile-response"]');
+        if (field && typeof field.value === 'string' && field.value.trim().length > 0) {
+          return field.value.trim();
+        }
+        return null;
+      });
+    };
+
+    let token = await readToken();
+    if (token) return token;
+
+    // Simulate user-like activation click on widget container or iframe
+    await page
+      .evaluate((docParam) => {
+        const d = docParam || document;
+        const target =
+          d.querySelector('.cf-turnstile') || d.querySelector('iframe[src*="turnstile"]');
+        if (!target) return;
+        try {
+          target.dispatchEvent(
+            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true })
+          );
+          target.dispatchEvent(
+            new PointerEvent('pointerup', { bubbles: true, cancelable: true, composed: true })
+          );
+        } catch (_) {}
+        try {
+          target.dispatchEvent(
+            new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true })
+          );
+          target.dispatchEvent(
+            new MouseEvent('mouseup', { bubbles: true, cancelable: true, composed: true })
+          );
+        } catch (_) {}
+        try {
+          target.click();
+        } catch (_) {}
+      })
+      .catch(() => {});
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, pollIntervalMs)); // ok: sleep
+      token = await readToken().catch(() => null);
+      if (token) return token;
+    }
+
+    throw new Error(
+      'Turnstile 验证码未在限定时间内完成，可能受限于当前网络 IP 信誉，请运行 node index.js --setup <id> 进行一次交互式人工验证。'
+    );
   }
 }
 
