@@ -13,6 +13,9 @@ class BasePlugin {
     // Custom user data directory for browser profile isolation.
     // If not specified, BrowserManager will resolve to .browser-data/<plugin-id>
     this.userDataDir = options.userDataDir || null;
+
+    // Optional native Chrome stealth mode for strict Cloudflare Turnstile OOPIF verification
+    this.turnstileStealth = Boolean(options.turnstileStealth);
   }
 
   /**

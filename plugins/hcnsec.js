@@ -1,6 +1,7 @@
 const { BasePlugin } = require('../core/base-plugin');
 
 const QUOTA_PER_USD = 500_000;
+const DEFAULT_TURNSTILE_SITEKEY = '0x4AAAAAAFIovBqwE9xMkrm_';
 
 class HcnsecPlugin extends BasePlugin {
   constructor() {
@@ -11,7 +12,9 @@ class HcnsecPlugin extends BasePlugin {
       url: 'https://api.hcnsec.cn/console',
       loginUrl: 'https://api.hcnsec.cn/sign-in',
       enabled: true,
+      turnstileStealth: true,
     });
+    this.profileUrl = 'https://api.hcnsec.cn/profile';
   }
 
   /**
@@ -113,61 +116,47 @@ class HcnsecPlugin extends BasePlugin {
     log('✅ Token 已成功保存至 .env！');
 
     log('正在验证 Token 有效性并执行首次签到打卡...');
-    const checkinRes = await this.onCheckin({
-      page: null,
-      browser: null,
+    const directRes = await this.onDirectApiCheckin({
       log,
+      session: null,
       helper,
     });
-
-    log(`🎉 签到验证完成: ${checkinRes.message} | 账户余额: ${checkinRes.balance}`);
-    return checkinRes;
+    if (directRes) {
+      log(`🎉 签到验证完成: ${directRes.message} | 账户余额: ${directRes.balance}`);
+      return directRes;
+    }
+    throw new Error(
+      '直连 Token 仅有效期 15 分钟且签到接口需 Turnstile 验证，推荐运行 "node index.js --setup hcnsec" 保存持久会话。'
+    );
   }
 
   /**
    * 交互式 Setup 模式：支持在弹出的浏览器中完成登录与 Turnstile 人机验证
    */
   async onSetup(context) {
-    const { page, log } = context;
+    const { page, log, helper } = context;
     log(`[${this.name}] Setup 模式：正在启动浏览器...`);
     log(`[${this.name}] 正在导航至登录页: ${this.loginUrl}`);
     await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await helper.dismissModals(page);
 
-    // 自动填入账号密码并勾选协议
-    await this.fillLoginForm(page, log);
-
-    log(`[${this.name}] 💡 请在弹出的浏览器中点击【请验证您是真人】复选框完成人机验证...`);
     log(
-      `[${this.name}] --------------------------------------------------------------------------------`
+      `[${this.name}] ⏳ 正在等待或自动完成 Cloudflare Turnstile 验证（也可手动点击复选框并登录）...`
     );
-    log(`[${this.name}] 📌 遇到 Cloudflare 提示【验证失败 故障排除】时：`);
-    log(`[${this.name}] 👉 推荐使用极速通道（自动唤起日常默认浏览器并一键保存 Token）：`);
-    log(`[${this.name}]    node index.js --setup hcnsec --system`);
-    log(
-      `[${this.name}] --------------------------------------------------------------------------------`
-    );
-    log(`[${this.name}] 等待登录完成并跳转至控制台或主页 (${this.url})...`);
 
-    // 监听 Turnstile 验证通过后自动点击提交
-    const submitBtn = page.locator('form button[type="submit"]').first();
-    const tryAutoSubmit = async () => {
+    const autoLoginTask = (async () => {
       try {
-        await page.waitForFunction(
-          () => {
-            const input = globalThis.document?.querySelector('input[name="cf-turnstile-response"]');
-            return !!(input && input.value && input.value.length > 0);
-          },
-          { timeout: 60000 }
-        );
-        if (await submitBtn.isEnabled().catch(() => false)) {
+        const tsToken = await helper
+          .resolveTurnstileToken(page, { timeoutMs: 40000 })
+          .catch(() => null);
+        await this.fillLoginForm(page, log);
+        const submitBtn = page.locator('form button[type="submit"]').first();
+        if (tsToken && (await submitBtn.isEnabled().catch(() => false))) {
           log(`[${this.name}] 检测到 Turnstile 验证已完成，自动点击【登录】提交...`);
           await submitBtn.click().catch(() => {});
         }
-      } catch (e) {
-        // 用户可能手动点击登录，忽略自动提交超时
-      }
-    };
-    tryAutoSubmit();
+      } catch (_) {}
+    })();
 
     try {
       await page.waitForURL(
@@ -185,33 +174,36 @@ class HcnsecPlugin extends BasePlugin {
         },
         { timeout: 300000, waitUntil: 'domcontentloaded' }
       );
-      log(`[${this.name}] 登录成功！会话已自动保存至 Profile。`);
+      await autoLoginTask.catch(() => {});
+      const todayISO = helper.getCSTISODateString
+        ? helper.getCSTISODateString()
+        : helper.getCSTDateString().replace(/\//g, '-');
+      await this.fetchSessionStatus(page, todayISO.slice(0, 7)).catch(() => {});
+      log(`[${this.name}] 登录成功！持久化 Refresh 会话已自动保存至 Profile。`);
     } catch (err) {
       log(`[${this.name}] 浏览器登录未完成或已关闭。`);
-      log(`[${this.name}] 💡 提示：若受 Cloudflare 拦截，推荐直接使用 Token 方式：`);
-      log(`[${this.name}]    在普通浏览器登录后按 F12 控制台运行：`);
-      log(
-        `[${this.name}]    fetch('/api/user/auth/refresh', { method: 'POST', credentials: 'include' }).then(r => r.json()).then(res => console.log('HCNSEC_TOKEN=' + res.data?.access_token));`
-      );
-      log(`[${this.name}]    并将得到的 HCNSEC_TOKEN=... 写入 .env 文件即可！`);
       throw err;
     }
   }
 
   /**
-   * 在已认证的浏览器会话中执行用户数据与签到 API
+   * 在浏览器上下文内刷新短期 Access Token 并获取当前用户信息与月度签到状态
+   * （注意：必须在浏览器内调用 /api/user/auth/refresh，确保 Set-Cookie 轮换的 new_api_refresh 写回浏览器 Cookie 库）
    */
-  async executeUserApi(page) {
-    return await page.evaluate(async () => {
+  async fetchSessionStatus(page, monthStr) {
+    return await page.evaluate(async (mStr) => {
       let token = null;
       try {
         const refreshRes = await fetch('/api/user/auth/refresh', {
           method: 'POST',
           credentials: 'include',
         });
-        const refreshJson = await refreshRes.json();
+        const refreshJson = await refreshRes.json().catch(() => null);
         token = refreshJson?.data?.access_token || null;
-      } catch (e) {}
+        if (token) {
+          localStorage.setItem('token', token);
+        }
+      } catch (_) {}
 
       let userObj = {};
       try {
@@ -219,49 +211,184 @@ class HcnsecPlugin extends BasePlugin {
         if (userStr) {
           userObj = JSON.parse(userStr);
           if (!token) {
-            token = userObj.token || userObj.access_token || null;
+            token = userObj.token || userObj.access_token || localStorage.getItem('token') || null;
           }
         }
-      } catch (e) {}
+      } catch (_) {}
 
-      const headers = {
+      const buildHeaders = () => ({
         'Content-Type': 'application/json',
-        ...(userObj.id ? { 'New-Api-User': String(userObj.id) } : {}),
+        ...(userObj?.id ? { 'New-Api-User': String(userObj.id) } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
+      });
 
       let selfData = null;
       try {
-        const rSelf = await fetch('/api/user/self', { credentials: 'include', headers });
-        selfData = await rSelf.json();
-      } catch (e) {}
+        const rSelf = await fetch('/api/user/self', {
+          credentials: 'include',
+          headers: buildHeaders(),
+        });
+        selfData = await rSelf.json().catch(() => null);
+        if (selfData?.success && selfData?.data?.id) {
+          userObj = selfData.data;
+          try {
+            localStorage.setItem('user', JSON.stringify(selfData.data));
+          } catch (_) {}
+        }
+      } catch (_) {}
 
-      let checkinData = null;
+      let checkinStatus = null;
+      let logItems = [];
       if (selfData?.success) {
         try {
-          const rCheckin = await fetch('/api/user/checkin', {
-            method: 'POST',
+          const rStatus = await fetch(`/api/user/checkin?month=${encodeURIComponent(mStr || '')}`, {
             credentials: 'include',
-            headers,
+            headers: buildHeaders(),
           });
-          checkinData = await rCheckin.json();
-        } catch (e) {}
+          checkinStatus = await rStatus.json().catch(() => null);
+        } catch (_) {}
+
+        try {
+          const rLog = await fetch('/api/log/self?p=1&page_size=10&type=4', {
+            credentials: 'include',
+            headers: buildHeaders(),
+          });
+          const logData = await rLog.json().catch(() => null);
+          if (logData?.data?.items && Array.isArray(logData.data.items)) {
+            logItems = logData.data.items;
+          }
+        } catch (_) {}
       }
 
-      let logItems = [];
+      return { selfData, checkinStatus, logItems, tokenFound: !!token };
+    }, monthStr);
+  }
+
+  /**
+   * 在浏览器页面内执行 POST /api/user/checkin；若要求 Turnstile 则动态挂载组件并完成验证后提交
+   */
+  async performBrowserCheckin(page, log, helper) {
+    // 1. 先尝试无 Turnstile 直接请求（兼容站点关闭签到验证码的情况）
+    const directAttempt = await page.evaluate(async () => {
+      let userObj = {};
       try {
-        const rLog = await fetch('/api/log/self?p=1&page_size=10&type=4', {
+        userObj = JSON.parse(localStorage.getItem('user') || '{}');
+      } catch (_) {}
+      const token = localStorage.getItem('token') || userObj.token || userObj.access_token || null;
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(userObj?.id ? { 'New-Api-User': String(userObj.id) } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+      try {
+        const res = await fetch('/api/user/checkin', {
+          method: 'POST',
           credentials: 'include',
           headers,
         });
-        const logData = await rLog.json();
-        if (logData?.data?.items && Array.isArray(logData.data.items)) {
-          logItems = logData.data.items;
-        }
-      } catch (e) {}
-
-      return { selfData, checkinData, logItems, tokenFound: !!token };
+        return await res.json().catch(() => null);
+      } catch (e) {
+        return { success: false, message: e.message };
+      }
     });
+
+    const msg = directAttempt?.message || '';
+    if (
+      directAttempt?.success ||
+      msg.includes('已签到') ||
+      msg.includes('重复') ||
+      msg.includes('already') ||
+      msg.includes('已经签到')
+    ) {
+      return directAttempt;
+    }
+
+    // 2. 若后端要求 Turnstile 验证，则在当前页挂载显式 Turnstile 组件并过盾
+    log(
+      `[${this.name}] 签到接口需要 Turnstile 人机验证 (${msg || 'Turnstile'})，正在加载验证组件...`
+    );
+
+    const renderResult = await page.evaluate(async (defaultSiteKey) => {
+      const doc = globalThis.document;
+      globalThis.__checkinTurnstileToken = null;
+      let sitekey = defaultSiteKey;
+      try {
+        const statusRes = await fetch('/api/status', { credentials: 'include' });
+        const statusJson = await statusRes.json().catch(() => null);
+        if (statusJson?.data?.turnstile_site_key) {
+          sitekey = statusJson.data.turnstile_site_key;
+        }
+      } catch (_) {}
+
+      const existingInputs = doc.querySelectorAll('[name="cf-turnstile-response"]');
+      existingInputs.forEach((el) => {
+        el.value = '';
+      });
+
+      let container = doc.getElementById('__checkin-turnstile-box');
+      if (container) container.remove();
+      container = doc.createElement('div');
+      container.id = '__checkin-turnstile-box';
+      container.style.cssText =
+        'position:fixed;top:16px;left:16px;z-index:2147483647;background:#fff;padding:12px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+      doc.body.appendChild(container);
+
+      if (!globalThis.turnstile) {
+        await new Promise((resolve, reject) => {
+          const script = doc.createElement('script');
+          script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = reject;
+          doc.head.appendChild(script);
+        });
+      }
+
+      if (!globalThis.turnstile || typeof globalThis.turnstile.render !== 'function') {
+        return { ok: false, error: 'Turnstile 脚本加载失败' };
+      }
+
+      globalThis.turnstile.render('#__checkin-turnstile-box', {
+        sitekey,
+        theme: 'light',
+        callback: (token) => {
+          globalThis.__checkinTurnstileToken = token;
+        },
+      });
+      return { ok: true, sitekey };
+    }, DEFAULT_TURNSTILE_SITEKEY);
+
+    if (!renderResult?.ok) {
+      throw new Error(`HCNSEC 签到验证组件初始化失败: ${renderResult?.error || '未知错误'}`);
+    }
+
+    const turnstileToken = await helper.resolveTurnstileToken(page, { timeoutMs: 35000 });
+    log(`[${this.name}] 签到 Turnstile 验证通过，正在提交打卡请求...`);
+
+    const checkinResult = await page.evaluate(async (tsToken) => {
+      const container = globalThis.document?.getElementById('__checkin-turnstile-box');
+      if (container) container.remove();
+
+      let userObj = {};
+      try {
+        userObj = JSON.parse(localStorage.getItem('user') || '{}');
+      } catch (_) {}
+      const token = localStorage.getItem('token') || userObj.token || userObj.access_token || null;
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(userObj?.id ? { 'New-Api-User': String(userObj.id) } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      const res = await fetch(`/api/user/checkin?turnstile=${encodeURIComponent(tsToken)}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+      });
+      return await res.json().catch(() => null);
+    }, turnstileToken);
+
+    return checkinResult;
   }
 
   findTodayCheckin(logItems, todayStr, helper) {
@@ -292,6 +419,18 @@ class HcnsecPlugin extends BasePlugin {
     return null;
   }
 
+  formatCheckinStatsMessage(checkinStatus, todayISO) {
+    const stats = checkinStatus?.data?.stats;
+    if (!stats?.checked_in_today) return null;
+    const records = Array.isArray(stats.records) ? stats.records : [];
+    const todayRecord = records.find((r) => r.checkin_date === todayISO);
+    if (todayRecord?.quota_awarded) {
+      const usd = (todayRecord.quota_awarded / QUOTA_PER_USD).toFixed(2);
+      return `今日已签到 (获得 $${usd} 额度)`;
+    }
+    return '今日已签到';
+  }
+
   calculateBalance(selfData) {
     if (selfData?.data?.quota !== undefined) {
       return `$${(selfData.data.quota / QUOTA_PER_USD).toFixed(2)}`;
@@ -300,69 +439,119 @@ class HcnsecPlugin extends BasePlugin {
   }
 
   /**
-   * Direct API 极速通道：通过已持久化的 Cookie/Token 直接完成签到与额度查询
+   * Direct API 极速通道：当短期 Token 仍在有效期内且今日已签到（或免验证签到成功）时极速返回；
+   * 若 Token 满 15 分钟过期或签到需 Turnstile 验证，则返回 null 交由浏览器通道无缝完成。
    */
   async onDirectApiCheckin({ log, session, helper }) {
     const envToken = process.env.HCNSEC_TOKEN || process.env.HCNSEC_ACCESS_TOKEN;
     const envCookie = process.env.HCNSEC_COOKIE;
 
-    let authHeaders = null;
-    if (envToken || envCookie) {
-      authHeaders = {
-        'Content-Type': 'application/json',
-        ...(envToken ? { Authorization: `Bearer ${envToken}` } : {}),
-        ...(envCookie ? { Cookie: envCookie } : {}),
-      };
-    } else if (session) {
-      authHeaders = {
+    const candidateHeaders = [];
+    if (session && (session.cookies || Object.keys(session.headers || {}).length > 0)) {
+      candidateHeaders.push({
         'Content-Type': 'application/json',
         ...(session.cookies ? { Cookie: session.cookies } : {}),
         ...session.headers,
-      };
+      });
+    }
+    if (envToken || envCookie) {
+      candidateHeaders.push({
+        'Content-Type': 'application/json',
+        ...(envToken ? { Authorization: `Bearer ${envToken}` } : {}),
+        ...(envCookie ? { Cookie: envCookie } : {}),
+      });
     }
 
-    if (!authHeaders) return null;
+    if (candidateHeaders.length === 0) return null;
 
     const todayStr = helper.getCSTDateString();
+    const todayISO = helper.getCSTISODateString
+      ? helper.getCSTISODateString()
+      : todayStr.replace(/\//g, '-');
+    const monthStr = todayISO.slice(0, 7);
     const baseUrl = new URL(this.url).origin;
 
     try {
       if (log) log(`[${this.name}] 正在通过 Direct API 检查打卡状态...`);
-      const rSelf = await fetch(`${baseUrl}/api/user/self`, { headers: authHeaders });
-      if (rSelf.status === 401 || rSelf.status === 403) {
-        return null;
-      }
-      const selfData = await rSelf.json().catch(() => null);
-      if (!selfData?.success) return null;
+      let authHeaders = null;
+      let selfData = null;
 
-      // 尝试签到
+      for (const headers of candidateHeaders) {
+        const rSelf = await fetch(`${baseUrl}/api/user/self`, { headers });
+        if (rSelf.status === 401 || rSelf.status === 403) {
+          continue;
+        }
+        const data = await rSelf.json?.().catch(() => null);
+        if (data?.success) {
+          authHeaders = headers;
+          selfData = data;
+          break;
+        }
+      }
+
+      if (!selfData?.success || !authHeaders) return null;
+
+      let checkinStatus = null;
+      try {
+        const rStatus = await fetch(
+          `${baseUrl}/api/user/checkin?month=${encodeURIComponent(monthStr)}`,
+          { headers: authHeaders }
+        );
+        if (rStatus && typeof rStatus.json === 'function') {
+          checkinStatus = await rStatus.json().catch(() => null);
+        }
+      } catch (_) {}
+
+      const statsMsg = this.formatCheckinStatsMessage(checkinStatus, todayISO);
+      if (statsMsg) {
+        return {
+          success: true,
+          message: statsMsg,
+          balance: this.calculateBalance(selfData),
+        };
+      }
+
+      // 尝试直接 POST 签到
       const rCheckin = await fetch(`${baseUrl}/api/user/checkin`, {
         method: 'POST',
         headers: authHeaders,
       });
-      const checkinData = await rCheckin.json().catch(() => null);
+      const checkinData = await rCheckin.json?.().catch(() => null);
 
       let logItems = [];
       try {
         const rLog = await fetch(`${baseUrl}/api/log/self?p=1&page_size=10&type=4`, {
           headers: authHeaders,
         });
-        const logData = await rLog.json().catch(() => null);
-        if (logData?.data?.items && Array.isArray(logData.data.items)) {
-          logItems = logData.data.items;
+        if (rLog && typeof rLog.json === 'function') {
+          const logData = await rLog.json().catch(() => null);
+          if (logData?.data?.items && Array.isArray(logData.data.items)) {
+            logItems = logData.data.items;
+          }
         }
       } catch (_) {}
 
       const balance = this.calculateBalance(selfData);
-      let message = '今日已签到';
       const todayCheckin = this.findTodayCheckin(logItems, todayStr, helper);
 
       if (checkinData?.success) {
-        message = checkinData.message || '签到成功';
-      } else if (todayCheckin) {
+        return {
+          success: true,
+          message: checkinData.message || '签到成功',
+          balance,
+        };
+      }
+
+      if (todayCheckin) {
         const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
-        message = `签到已确认: ${todayCheckin.content} (${checkinTime})`;
-      } else if (checkinData?.message) {
+        return {
+          success: true,
+          message: `签到已确认: ${todayCheckin.content} (${checkinTime})`,
+          balance,
+        };
+      }
+
+      if (checkinData?.message) {
         const msg = checkinData.message;
         if (
           msg.includes('已签到') ||
@@ -370,98 +559,40 @@ class HcnsecPlugin extends BasePlugin {
           msg.includes('already') ||
           msg.includes('已经签到')
         ) {
-          message = msg;
-        } else {
-          return null;
+          return { success: true, message: msg, balance };
         }
+        // 需要 Turnstile 验证码时返回 null，交由 Playwright 浏览器通道自动过盾打卡
+        return null;
       }
 
-      return { success: true, message, balance };
+      return { success: true, message: '今日已签到', balance };
     } catch (_) {
       return null;
     }
   }
 
   /**
-   * 核心签到逻辑：支持 Fast-Path 会话复用与降级表单登录
+   * 核心签到逻辑：通过浏览器持久化 Refresh Cookie 续期会话，并在需要时自动完成登录与签到双端 Turnstile 验证
    */
   async onCheckin({ page, log, helper }) {
     const todayStr = helper.getCSTDateString();
+    const todayISO = helper.getCSTISODateString
+      ? helper.getCSTISODateString()
+      : todayStr.replace(/\//g, '-');
+    const monthStr = todayISO.slice(0, 7);
 
-    // 0. Super Fast-Path: 若 .env 中配置了 HCNSEC_TOKEN 或 HCNSEC_COOKIE，直接无缝免浏览器打卡
-    const envToken = process.env.HCNSEC_TOKEN || process.env.HCNSEC_ACCESS_TOKEN;
-    const envCookie = process.env.HCNSEC_COOKIE;
-
-    if (envToken || envCookie) {
-      log(`[${this.name}] 检测到 .env 中已配置 Token/Cookie，尝试通过直连凭据签到...`);
-      try {
-        const authHeaders = {
-          'Content-Type': 'application/json',
-          ...(envToken ? { Authorization: `Bearer ${envToken}` } : {}),
-          ...(envCookie ? { Cookie: envCookie } : {}),
-        };
-
-        const rSelf = await fetch('https://api.hcnsec.cn/api/user/self', { headers: authHeaders });
-        const selfData = await rSelf.json().catch(() => null);
-
-        if (selfData?.success) {
-          const rCheckin = await fetch('https://api.hcnsec.cn/api/user/checkin', {
-            method: 'POST',
-            headers: authHeaders,
-          });
-          const checkinData = await rCheckin.json().catch(() => null);
-
-          let logItems = [];
-          try {
-            const rLog = await fetch('https://api.hcnsec.cn/api/log/self?p=1&page_size=10&type=4', {
-              headers: authHeaders,
-            });
-            const logData = await rLog.json().catch(() => null);
-            if (logData?.data?.items && Array.isArray(logData.data.items)) {
-              logItems = logData.data.items;
-            }
-          } catch (e) {}
-
-          const balance = this.calculateBalance(selfData);
-          let message = '今日已签到';
-          const todayCheckin = this.findTodayCheckin(logItems, todayStr, helper);
-
-          if (checkinData?.success) {
-            message = checkinData.message || '签到成功';
-          } else if (todayCheckin) {
-            const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
-            message = `签到已确认: ${todayCheckin.content} (${checkinTime})`;
-          } else if (checkinData?.message) {
-            const msg = checkinData.message;
-            if (
-              msg.includes('已签到') ||
-              msg.includes('重复') ||
-              msg.includes('already') ||
-              msg.includes('已经签到')
-            ) {
-              message = msg;
-            } else {
-              throw new Error(`HCNSEC 签到失败: ${msg}`);
-            }
-          }
-
-          return { success: true, message, balance };
-        }
-      } catch (err) {
-        log(`[${this.name}] 直连凭据验证失败: ${err.message}，回退至浏览器会话流程...`);
-      }
-    }
-
-    // 1. Fast-Path: 优先检查当前持久化会话是否有效
-    log(`[${this.name}] 正在检查当前会话与登录状态...`);
-    await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    // 1. 优先打开个人中心页并尝试通过持久化 HttpOnly Refresh Cookie 刷新 Access Token
+    log(`[${this.name}] 正在检查当前持久化会话与签到状态...`);
+    await page
+      .goto(this.profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      .catch(() => {});
     await helper.dismissModals(page);
 
-    let apiResult = await this.executeUserApi(page);
+    let sessionStatus = await this.fetchSessionStatus(page, monthStr);
 
-    // 2. 若会话失效或未登录，尝试在浏览器中自动登录
-    if (!apiResult?.selfData?.success) {
-      log(`[${this.name}] 当前会话未登录或已过期，尝试通过账号密码登录...`);
+    // 2. 若 Refresh Cookie 已失效或未登录，则使用 .env 中的账号密码配合原生无痕 Chrome 自动过 Turnstile 登录
+    if (!sessionStatus?.selfData?.success) {
+      log(`[${this.name}] 当前会话未登录或已过期，正在通过账号密码登录...`);
       const username = process.env.HCNSEC_USERNAME;
       const password = process.env.HCNSEC_PASSWORD;
 
@@ -474,89 +605,132 @@ class HcnsecPlugin extends BasePlugin {
       await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await helper.dismissModals(page);
 
+      log(`[${this.name}] 等待登录页 Cloudflare Turnstile 验证就绪并自动完成点击...`);
+      const loginTurnstileToken = await helper
+        .resolveTurnstileToken(page, { timeoutMs: 35000 })
+        .catch(() => null);
+
       await this.fillLoginForm(page, log);
-
-      log(`[${this.name}] 等待 Cloudflare Turnstile 验证就绪...`);
-      await helper.resolveTurnstileToken(page, { timeoutMs: 15000 }).catch(() => null);
-
-      const turnstileToken = await page.evaluate(() => {
-        const input = globalThis.document?.querySelector('input[name="cf-turnstile-response"]');
-        return input && input.value ? input.value : null;
-      });
 
       const submitBtn = page.locator('form button[type="submit"]').first();
       await submitBtn.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
 
-      if (turnstileToken && (await submitBtn.isEnabled().catch(() => false))) {
-        log(`[${this.name}] 验证通过，点击登录提交按钮...`);
+      if (loginTurnstileToken && (await submitBtn.isEnabled().catch(() => false))) {
+        log(`[${this.name}] 登录页 Turnstile 验证通过，点击登录提交按钮...`);
         await submitBtn.click().catch(() => {});
       } else if (await submitBtn.isEnabled().catch(() => false)) {
         log(`[${this.name}] 点击登录提交按钮...`);
         await submitBtn.click().catch(() => {});
       }
 
-      // 等待离开登录页面
       const loginSucceeded = await page
         .waitForURL(
           (url) => {
             const p = url.pathname;
             return !p.includes('/login') && !p.includes('/sign-in');
           },
-          { timeout: 15000, waitUntil: 'domcontentloaded' }
+          { timeout: 20000, waitUntil: 'domcontentloaded' }
         )
         .catch(() => false);
 
       if (loginSucceeded) {
-        log(`[${this.name}] 登录跳转成功，进入控制台...`);
-        if (!page.url().includes('/console')) {
-          await page
-            .goto(this.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-            .catch(() => {});
-        }
+        log(`[${this.name}] 登录跳转成功，正在同步个人中心与签到数据...`);
+        await page
+          .goto(this.profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+          .catch(() => {});
         await helper.dismissModals(page);
       }
 
-      // 重新执行 API 获取登录后数据
-      apiResult = await this.executeUserApi(page);
+      sessionStatus = await this.fetchSessionStatus(page, monthStr);
     }
 
-    if (!apiResult?.selfData?.success) {
+    if (!sessionStatus?.selfData?.success) {
       throw new Error(
-        'HCNSEC 登录失败（未通过 Cloudflare Turnstile 人机验证或 Token 已失效）。请运行 "node index.js --setup hcnsec" 在弹出的浏览器中完成登录，或运行 "node index.js --setup hcnsec --system" 唤起日常默认浏览器一键更新 Token 至 .env！'
+        'HCNSEC 登录失败（未通过 Cloudflare Turnstile 人机验证或账号凭据有误）。请运行 "node index.js --setup hcnsec" 在弹出的浏览器中完成登录。'
       );
     }
 
-    const balance = this.calculateBalance(apiResult.selfData);
-    let message = '今日已签到';
-    const checkinData = apiResult.checkinData;
-    const todayCheckin = this.findTodayCheckin(apiResult.logItems, todayStr, helper);
+    // 3. 检查今日是否已经签到
+    const existingStatsMsg = this.formatCheckinStatsMessage(sessionStatus.checkinStatus, todayISO);
+    const existingLogCheckin = this.findTodayCheckin(sessionStatus.logItems, todayStr, helper);
 
-    if (checkinData?.success) {
-      message = checkinData.message || '签到成功';
-    } else if (todayCheckin) {
-      const checkinTime = helper.getCSTDateTimeString(todayCheckin.created_at * 1000);
-      message = `签到已确认: ${todayCheckin.content} (${checkinTime})`;
-    } else if (checkinData?.message) {
-      const msg = checkinData.message;
-      if (
-        msg.includes('已签到') ||
-        msg.includes('重复') ||
-        msg.includes('already') ||
-        msg.includes('已经签到')
-      ) {
-        message = msg;
-      } else {
-        throw new Error(`HCNSEC 签到失败: ${msg}`);
-      }
-    } else if (balance) {
-      message = '已处于登录状态，账户额度正常';
+    if (existingStatsMsg) {
+      return {
+        success: true,
+        message: existingStatsMsg,
+        balance: this.calculateBalance(sessionStatus.selfData),
+      };
     }
 
-    return {
-      success: true,
-      message,
-      balance,
-    };
+    if (existingLogCheckin) {
+      const checkinTime = helper.getCSTDateTimeString(existingLogCheckin.created_at * 1000);
+      return {
+        success: true,
+        message: `签到已确认: ${existingLogCheckin.content} (${checkinTime})`,
+        balance: this.calculateBalance(sessionStatus.selfData),
+      };
+    }
+
+    // 4. 今日尚未签到：执行签到（自动处理签到接口的 Turnstile 验证）
+    const checkinData = await this.performBrowserCheckin(page, log, helper);
+
+    // 签到完成后重新拉取最新余额与签到状态
+    const updatedStatus = await this.fetchSessionStatus(page, monthStr);
+    const finalSelfData = updatedStatus?.selfData?.success
+      ? updatedStatus.selfData
+      : sessionStatus.selfData;
+    const balance = this.calculateBalance(finalSelfData);
+
+    if (checkinData?.success) {
+      const quotaAwarded = checkinData?.data?.quota_awarded;
+      const rewardSuffix = quotaAwarded
+        ? ` (获得 $${(quotaAwarded / QUOTA_PER_USD).toFixed(2)} 额度)`
+        : '';
+      return {
+        success: true,
+        message: `${checkinData.message || '签到成功'}${rewardSuffix}`,
+        balance,
+      };
+    }
+
+    const updatedStatsMsg = this.formatCheckinStatsMessage(updatedStatus?.checkinStatus, todayISO);
+    if (updatedStatsMsg) {
+      return {
+        success: true,
+        message: updatedStatsMsg,
+        balance,
+      };
+    }
+
+    const updatedLogCheckin = this.findTodayCheckin(
+      updatedStatus?.logItems || [],
+      todayStr,
+      helper
+    );
+    if (updatedLogCheckin) {
+      const checkinTime = helper.getCSTDateTimeString(updatedLogCheckin.created_at * 1000);
+      return {
+        success: true,
+        message: `签到已确认: ${updatedLogCheckin.content} (${checkinTime})`,
+        balance,
+      };
+    }
+
+    const errMsg = checkinData?.message || '未知错误';
+    if (
+      errMsg.includes('已签到') ||
+      errMsg.includes('重复') ||
+      errMsg.includes('already') ||
+      errMsg.includes('已经签到')
+    ) {
+      return {
+        success: true,
+        message: errMsg,
+        balance,
+      };
+    }
+
+    throw new Error(`HCNSEC 签到失败: ${errMsg}`);
   }
 }
 

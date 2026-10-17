@@ -1,4 +1,4 @@
-/* global window, document, PointerEvent, MouseEvent */
+/* global window, document */
 
 /**
  * PageHelper provides a rich toolkit for common browser automation operations.
@@ -465,8 +465,10 @@ class PageHelper {
    * @returns {Promise<string>}
    */
   static async resolveTurnstileToken(page, options = {}) {
-    const timeoutMs = options.timeoutMs || 25000;
-    const pollIntervalMs = options.pollIntervalMs || 300;
+    const timeoutMs = options.timeoutMs || 35000;
+    const pollIntervalMs = options.pollIntervalMs || 500;
+    const initialWaitMs = options.initialWaitMs ?? 8500;
+    const retryClickIntervalMs = options.retryClickIntervalMs || 8500;
 
     if (options.preTriggerSelector) {
       try {
@@ -479,6 +481,13 @@ class PageHelper {
 
     const readToken = async () => {
       return await page.evaluate((docParam) => {
+        if (
+          typeof window !== 'undefined' &&
+          typeof window.__checkinTurnstileToken === 'string' &&
+          window.__checkinTurnstileToken.trim().length > 0
+        ) {
+          return window.__checkinTurnstileToken.trim();
+        }
         const d = docParam || document;
         const field = d.querySelector('[name="cf-turnstile-response"]');
         if (field && typeof field.value === 'string' && field.value.trim().length > 0) {
@@ -488,68 +497,58 @@ class PageHelper {
       });
     };
 
-    let token = await readToken();
+    let token = await readToken().catch(() => null);
     if (token) return token;
 
-    // Simulate user-like activation click on widget container or iframe
-    await page
-      .evaluate((docParam) => {
-        const d = docParam || document;
-        const target =
-          d.querySelector('.cf-turnstile') ||
-          d.querySelector('iframe[src*="turnstile"]') ||
-          d.querySelector('iframe[src*="challenges.cloudflare.com"]');
-        if (!target) return;
-        try {
-          target.dispatchEvent(
-            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true })
-          );
-          target.dispatchEvent(
-            new PointerEvent('pointerup', { bubbles: true, cancelable: true, composed: true })
-          );
-        } catch (_) {}
-        try {
-          target.dispatchEvent(
-            new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true })
-          );
-          target.dispatchEvent(
-            new MouseEvent('mouseup', { bubbles: true, cancelable: true, composed: true })
-          );
-        } catch (_) {}
-        try {
-          target.click();
-        } catch (_) {}
-      })
-      .catch(() => {});
-
-    try {
-      if (typeof page.frames === 'function') {
-        const turnstileFrame = page
-          .frames()
-          .find(
-            (f) =>
-              f.url &&
-              (f.url().includes('challenges.cloudflare.com') || f.url().includes('turnstile'))
-          );
-        if (turnstileFrame && typeof turnstileFrame.frameElement === 'function') {
-          const frameEl = await turnstileFrame.frameElement().catch(() => null);
-          if (frameEl) {
-            const box = await frameEl.boundingBox().catch(() => null);
-            if (box && box.width > 0 && box.height > 0) {
-              await frameEl
-                .click({ position: { x: Math.min(30, box.width / 2), y: box.height / 2 } })
-                .catch(() => {});
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
     const start = Date.now();
+    let frameFirstSeenAt = 0;
+    let lastClickAt = 0;
+
     while (Date.now() - start < timeoutMs) {
       await new Promise((r) => setTimeout(r, pollIntervalMs)); // ok: sleep
       token = await readToken().catch(() => null);
       if (token) return token;
+
+      // Wait for Turnstile iframe spinner to finish rendering checkbox before clicking
+      try {
+        if (typeof page.frames === 'function') {
+          const turnstileFrame = page
+            .frames()
+            .find(
+              (f) =>
+                f.url &&
+                (f.url().includes('challenges.cloudflare.com') || f.url().includes('turnstile'))
+            );
+          if (turnstileFrame && typeof turnstileFrame.frameElement === 'function') {
+            const frameEl = await turnstileFrame.frameElement().catch(() => null);
+            if (frameEl) {
+              const box = await frameEl.boundingBox().catch(() => null);
+              if (box && box.width > 0 && box.height > 0) {
+                const now = Date.now();
+                if (!frameFirstSeenAt) {
+                  frameFirstSeenAt = now;
+                }
+                if (
+                  now - frameFirstSeenAt >= initialWaitMs &&
+                  now - lastClickAt >= retryClickIntervalMs
+                ) {
+                  lastClickAt = now;
+                  const clickX = box.x + Math.min(28, box.width / 2);
+                  const clickY = box.y + box.height / 2;
+                  if (page.mouse && typeof page.mouse.click === 'function') {
+                    await page.mouse.move(clickX, clickY, { steps: 6 }).catch(() => {});
+                    await page.mouse.click(clickX, clickY, { delay: 65 }).catch(() => {});
+                  } else {
+                    await frameEl
+                      .click({ position: { x: Math.min(28, box.width / 2), y: box.height / 2 } })
+                      .catch(() => {});
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
     }
 
     throw new Error(

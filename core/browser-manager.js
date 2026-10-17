@@ -267,26 +267,59 @@ class BrowserManager {
 
     const headless = this.debug ? false : !isSetup;
     const stealthMeta = this.resolveStealthMeta();
+    const hasDisplay =
+      !process.env.CI &&
+      (process.platform === 'darwin' ||
+        process.platform === 'win32' ||
+        Boolean(process.env.DISPLAY));
+    const useNativeTurnstileStealth = Boolean(plugin.turnstileStealth && hasDisplay);
 
     this.log(
       `[${plugin.name}] 正在启动浏览器 (Profile: ${path.basename(userDataDir)}, Headless: ${headless})...`
     );
 
-    const browser = await chromium.launchPersistentContext(userDataDir, {
-      headless,
-      viewport: { width: 1280, height: 800 },
-      locale: 'zh-CN',
-      timezoneId: 'Asia/Shanghai',
-      args: ['--disable-blink-features=AutomationControlled', '--no-default-browser-check'],
-      userAgent: stealthMeta.userAgent,
-    });
+    let browser;
+    if (useNativeTurnstileStealth) {
+      const args = ['--disable-blink-features=AutomationControlled'];
+      if (headless) {
+        args.push('--window-position=-2400,-2400');
+      }
+      try {
+        browser = await chromium.launchPersistentContext(userDataDir, {
+          channel: 'chrome',
+          headless: false,
+          ignoreDefaultArgs: ['--enable-automation'],
+          args,
+          viewport: null,
+        });
+      } catch (_) {
+        browser = await chromium.launchPersistentContext(userDataDir, {
+          headless: false,
+          ignoreDefaultArgs: ['--enable-automation'],
+          args,
+          viewport: null,
+        });
+      }
+    } else {
+      browser = await chromium.launchPersistentContext(userDataDir, {
+        headless,
+        viewport: { width: 1280, height: 800 },
+        locale: 'zh-CN',
+        timezoneId: 'Asia/Shanghai',
+        args: ['--disable-blink-features=AutomationControlled', '--no-default-browser-check'],
+        userAgent: stealthMeta.userAgent,
+      });
 
-    // 注入高级隐身脚本，抹除自动化与无头特征
-    const stealthScript = this.buildStealthScript(stealthMeta);
-    await browser.addInitScript(stealthScript);
+      // 注入高级隐身脚本，抹除自动化与无头特征
+      const stealthScript = this.buildStealthScript(stealthMeta);
+      await browser.addInitScript(stealthScript);
+    }
 
     const page = browser.pages()[0] || (await browser.newPage());
-    await page.addInitScript(stealthScript);
+    if (!useNativeTurnstileStealth) {
+      const stealthScript = this.buildStealthScript(stealthMeta);
+      await page.addInitScript(stealthScript);
+    }
     const context = {
       page,
       browser,
