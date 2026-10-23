@@ -218,4 +218,23 @@ test('PageHelper - StorageState & Session Management', async (t) => {
       assert.equal(session.headers['Authorization'], 'Bearer bearer-jwt-token');
     }
   );
+
+  await t.test(
+    'syncGitHubSessionCookies returns true immediately when valid user_session exists',
+    async () => {
+      const mockBrowser = {
+        cookies: async () => [
+          {
+            name: 'user_session',
+            value: 'gh-sess-123',
+            domain: 'github.com',
+            expires: Math.floor(Date.now() / 1000) + 86400,
+          },
+        ],
+        addCookies: async () => {},
+      };
+      const synced = await PageHelper.syncGitHubSessionCookies(mockBrowser);
+      assert.equal(synced, true);
+    }
+  );
 });

@@ -84,6 +84,88 @@ class PageHelper {
   }
 
   /**
+   * Synchronize fresh GitHub OAuth session cookies from sibling profiles in .browser-data
+   * when the current isolated profile's GitHub user_session cookie is missing or expired.
+   * @param {import('playwright').BrowserContext} [browser]
+   */
+  static async syncGitHubSessionCookies(browser) {
+    if (
+      !browser ||
+      typeof browser.cookies !== 'function' ||
+      typeof browser.addCookies !== 'function'
+    ) {
+      return false;
+    }
+    try {
+      const nowSec = Date.now() / 1000;
+      const existing = await browser.cookies('https://github.com').catch(() => []);
+      const hasValidSession = existing.some(
+        (c) => c.name === 'user_session' && c.value && (!c.expires || c.expires > nowSec + 300)
+      );
+      if (hasValidSession) {
+        return true;
+      }
+
+      const fs = require('fs');
+      const path = require('path');
+      const browserDataDir = path.resolve(__dirname, '..', '.browser-data');
+      if (!fs.existsSync(browserDataDir)) return false;
+
+      let bestCookies = null;
+      let bestExpiry = 0;
+
+      for (const entry of fs.readdirSync(browserDataDir)) {
+        const statePath = path.join(browserDataDir, entry, 'state.json');
+        if (!fs.existsSync(statePath)) continue;
+        try {
+          const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+          const ghCookies = (state.cookies || []).filter(
+            (c) => c && c.domain && c.domain.includes('github.com')
+          );
+          const userSession = ghCookies.find(
+            (c) => c.name === 'user_session' && c.value && c.expires > nowSec + 300
+          );
+          if (userSession && userSession.expires > bestExpiry) {
+            bestExpiry = userSession.expires;
+            bestCookies = ghCookies;
+          }
+        } catch (_) {}
+      }
+
+      if (!bestCookies || bestCookies.length === 0) return false;
+
+      const normalized = bestCookies.map((c) => {
+        if (c.name.startsWith('__Host-')) {
+          return {
+            name: c.name,
+            value: c.value,
+            url: 'https://github.com',
+            secure: true,
+            httpOnly: Boolean(c.httpOnly),
+            sameSite: c.sameSite || 'Strict',
+            ...(c.expires && c.expires > 0 ? { expires: c.expires } : {}),
+          };
+        }
+        return {
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || '/',
+          secure: Boolean(c.secure),
+          httpOnly: Boolean(c.httpOnly),
+          sameSite: c.sameSite || 'Lax',
+          ...(c.expires && c.expires > 0 ? { expires: c.expires } : {}),
+        };
+      });
+
+      await browser.addCookies(normalized);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
    * Handle OAuth flow (supports both popup mode and direct redirection).
    * @param {Object} params
    * @param {import('playwright').Page} params.page
@@ -93,10 +175,16 @@ class PageHelper {
    * @param {number} [params.timeout=20000]
    */
   static async handleOAuth({ page, triggerSelector, popupMatch, targetUrl, timeout = 25000 }) {
+    if (typeof page.context === 'function') {
+      await this.syncGitHubSessionCookies(page.context()).catch(() => {});
+    }
+
     await this.dismissModals(page);
 
     const triggerBtn = page.locator(triggerSelector).first();
     await triggerBtn.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+    await this.dismissModals(page);
+
     const isVisible = await triggerBtn.isVisible().catch(() => false);
     if (!isVisible) {
       throw new Error(
@@ -106,6 +194,8 @@ class PageHelper {
     const cleanTarget = targetUrl ? targetUrl.replace(/^\*+/, '').replace(/\*+$/, '') : '';
     const cleanPopupMatch =
       typeof popupMatch === 'string' ? popupMatch.replace(/^\*+/, '').replace(/\*+$/, '') : null;
+
+    const initialUrl = typeof page.url === 'function' ? page.url() : '';
 
     const clickTrigger = async () => {
       try {
@@ -124,10 +214,20 @@ class PageHelper {
       }
     };
 
-    const [popup] = await Promise.all([
+    const popupOrRedirect = Promise.race([
       page.waitForEvent('popup', { timeout: 10000 }).catch(() => null),
-      clickTrigger(),
+      typeof page.waitForURL === 'function' && initialUrl
+        ? page
+            .waitForURL((u) => (u.href || u.toString()) !== initialUrl, {
+              timeout: 10000,
+              waitUntil: 'domcontentloaded',
+            })
+            .then(() => null)
+            .catch(() => null)
+        : new Promise((r) => setTimeout(() => r(null), 10000)), // ok: sleep
     ]);
+
+    const [popup] = await Promise.all([popupOrRedirect, clickTrigger()]);
 
     if (popup) {
       const isTargetUrl = (url) => {
@@ -208,64 +308,67 @@ class PageHelper {
       }
     } else {
       // Direct redirect mode in the current page
-      const cleanTarget = targetUrl ? targetUrl.replace(/^\*+/, '').replace(/\*+$/, '') : '';
+      const isDirectTargetUrl = (url) => {
+        const u = (url && (url.href || url.toString())) || '';
+        if (
+          u.includes('/oauth/github') ||
+          u.includes('/api/oauth') ||
+          u.includes('/login') ||
+          u.includes('/sign-in') ||
+          u.includes('github.com')
+        ) {
+          return false;
+        }
+        return (
+          u.includes('/dashboard') ||
+          u.includes('/console') ||
+          (targetUrl && u.includes(targetUrl)) ||
+          (cleanTarget && u.includes(cleanTarget))
+        );
+      };
+
       // 1. Wait for either the GitHub authorization consent screen or final destination
       const authBtnSelector =
         'button:has-text("Authorize"), input[value="Authorize"], button[name="authorize"]';
-      await Promise.race([
-        page
-          .waitForSelector(authBtnSelector, { timeout: 8000 })
-          .then(async (btn) => {
-            if (btn && (await btn.isVisible().catch(() => false))) {
-              await btn.click().catch(() => {});
-            }
-          })
-          .catch(() => {}),
-        page
-          .waitForURL(
-            (url) => {
-              const u = url.href || url.toString();
-              if (u.includes('/oauth/github') || u.includes('/api/oauth')) return false;
-              return (
-                u.includes('/dashboard') ||
-                u.includes('/console') ||
-                (targetUrl && u.includes(targetUrl)) ||
-                (cleanTarget && u.includes(cleanTarget))
-              );
-            },
-            { timeout, waitUntil: 'domcontentloaded' }
-          )
-          .catch(() => {}),
-      ]);
+      if (!isDirectTargetUrl(page.url())) {
+        await Promise.race([
+          page
+            .waitForSelector(authBtnSelector, { timeout: 8000 })
+            .then(async (btn) => {
+              if (btn && (await btn.isVisible().catch(() => false))) {
+                await btn.click().catch(() => {});
+              }
+            })
+            .catch(() => {}),
+          page
+            .waitForURL(isDirectTargetUrl, { timeout, waitUntil: 'domcontentloaded' })
+            .catch(() => {}),
+        ]);
+      }
 
       // 2. Wait until redirection completes to the target or dashboard (ignoring intermediate /oauth callback)
-      await page
-        .waitForURL(
-          (url) => {
-            const u = url.href || url.toString();
-            if (u.includes('/oauth/github') || u.includes('/api/oauth')) return false;
-            return (
-              u.includes('/dashboard') ||
-              u.includes('/console') ||
-              (targetUrl && u.includes(targetUrl)) ||
-              (cleanTarget && u.includes(cleanTarget))
-            );
-          },
-          { timeout, waitUntil: 'domcontentloaded' }
-        )
-        .catch(() => {});
+      if (!isDirectTargetUrl(page.url()) && !page.url().includes('github.com/login')) {
+        await page
+          .waitForURL(isDirectTargetUrl, { timeout, waitUntil: 'domcontentloaded' })
+          .catch(() => {});
+      }
 
-      // 3. Ensure we are on target page
-      if (targetUrl) {
+      // 3. Ensure we are on target page if OAuth succeeded
+      const currentUrl = page.url();
+      const isStuckOnAuth =
+        currentUrl.includes('github.com/login') ||
+        currentUrl.includes('/sign-in') ||
+        currentUrl.includes('/login');
+      if (targetUrl && !isStuckOnAuth && !isDirectTargetUrl(currentUrl)) {
         let dest;
         try {
           dest = cleanTarget.startsWith('http')
             ? cleanTarget
-            : new URL(cleanTarget, page.url()).href;
+            : new URL(cleanTarget, currentUrl).href;
         } catch (_) {
           dest = cleanTarget;
         }
-        if (dest.startsWith('http') && !page.url().includes(dest)) {
+        if (dest.startsWith('http') && !currentUrl.includes(dest)) {
           await page.goto(dest, { waitUntil: 'domcontentloaded', timeout }).catch(() => {});
         }
       }
