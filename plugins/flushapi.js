@@ -55,7 +55,7 @@ class FlushApiPlugin extends BasePlugin {
    * 交互式 Setup 模式，支持自动勾选协议并触发 GitHub 登录
    */
   async onSetup(context) {
-    const { page, log } = context;
+    const { page, browser, log, helper } = context;
     log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成 GitHub 登录...`);
     log(`[${this.name}] 正在导航至登录页: ${this.loginUrl}`);
     await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -73,22 +73,30 @@ class FlushApiPlugin extends BasePlugin {
     }
 
     log(`[${this.name}] 等待登录完成并跳转至个人中心 (${this.url})...`);
-    await page.waitForURL(
-      (url) => {
-        const p = url.pathname;
-        if (p.includes('/login')) return false;
-        return (
-          url.href.startsWith(this.url) ||
-          p.includes('/profile') ||
-          p.includes('/dashboard') ||
-          p.includes('/console')
-        );
-      },
-      {
+    const predicate = (url) => {
+      const p = url.pathname;
+      if (p.includes('/login') || p.includes('/oauth') || url.hostname?.includes('github.com')) {
+        return false;
+      }
+      return (
+        url.href.startsWith(this.url) ||
+        p.includes('/profile') ||
+        p.includes('/dashboard') ||
+        p.includes('/console')
+      );
+    };
+    if (helper && typeof helper.waitForNavigationAcrossPages === 'function') {
+      await helper.waitForNavigationAcrossPages(page, predicate, {
         timeout: 300000,
         waitUntil: 'domcontentloaded',
-      }
-    );
+        browser,
+      });
+    } else {
+      await page.waitForURL(predicate, {
+        timeout: 300000,
+        waitUntil: 'domcontentloaded',
+      });
+    }
     log(`[${this.name}] 登录成功！会话已自动保存。`);
   }
 

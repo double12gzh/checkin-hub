@@ -18,7 +18,7 @@ class KKTokenPlugin extends BasePlugin {
    * 交互式 Setup 模式，支持自动触发或手动完成 GitHub 登录
    */
   async onSetup(context) {
-    const { page, log } = context;
+    const { page, browser, log, helper } = context;
     log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成 GitHub 登录...`);
     log(`[${this.name}] 正在导航至登录页: ${this.loginUrl}`);
     await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -33,10 +33,20 @@ class KKTokenPlugin extends BasePlugin {
     }
 
     log(`[${this.name}] 等待登录完成并跳转至控制台 (${this.url})...`);
-    await page.waitForURL((url) => url.pathname.includes('/dashboard'), {
-      timeout: 300000,
-      waitUntil: 'domcontentloaded',
-    });
+    const predicate = (url) =>
+      !url.pathname.includes('/oauth') && url.pathname.includes('/dashboard');
+    if (helper && typeof helper.waitForNavigationAcrossPages === 'function') {
+      await helper.waitForNavigationAcrossPages(page, predicate, {
+        timeout: 300000,
+        waitUntil: 'domcontentloaded',
+        browser,
+      });
+    } else {
+      await page.waitForURL(predicate, {
+        timeout: 300000,
+        waitUntil: 'domcontentloaded',
+      });
+    }
     log(`[${this.name}] 登录成功！会话已自动保存。`);
   }
 

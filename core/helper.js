@@ -166,6 +166,162 @@ class PageHelper {
   }
 
   /**
+   * Wait for navigation matching predicate across the primary page AND any popup/new tabs
+   * in the same BrowserContext. Prevents --setup from hanging on Tab 1 when OAuth or manual
+   * login opens and completes in Tab 2.
+   * @param {import('playwright').Page} page
+   * @param {(url: URL) => boolean} predicate
+   * @param {Object} [options]
+   * @param {number} [options.timeout=300000]
+   * @param {'load'|'domcontentloaded'|'networkidle'} [options.waitUntil='domcontentloaded']
+   * @param {import('playwright').BrowserContext} [options.browser]
+   * @returns {Promise<import('playwright').Page>}
+   */
+  static async waitForNavigationAcrossPages(page, predicate, options = {}) {
+    const timeout = options.timeout || 300000;
+    const waitUntil = options.waitUntil || 'domcontentloaded';
+    const ctx = options.browser || (typeof page?.context === 'function' ? page.context() : null);
+
+    if (!ctx || typeof ctx.pages !== 'function') {
+      await page.waitForURL(predicate, { timeout, waitUntil });
+      return page;
+    }
+
+    const matchUrl = (rawUrl) => {
+      if (!rawUrl || rawUrl === 'about:blank') return false;
+      try {
+        const urlObj = typeof rawUrl === 'string' ? new URL(rawUrl) : rawUrl;
+        return Boolean(predicate(urlObj));
+      } catch (_) {
+        return false;
+      }
+    };
+
+    let settled = false;
+    let pollTimer = null;
+    let timeoutTimer = null;
+    const watchedPages = new Set();
+
+    const matchedPage = await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        settled = true;
+        if (pollTimer) clearInterval(pollTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (typeof ctx.off === 'function') {
+          ctx.off('page', watchPage);
+        } else if (typeof ctx.removeListener === 'function') {
+          ctx.removeListener('page', watchPage);
+        }
+      };
+
+      const finishResolve = (targetPage) => {
+        if (settled) return;
+        cleanup();
+        resolve(targetPage);
+      };
+
+      const finishReject = (err) => {
+        if (settled) return;
+        cleanup();
+        reject(err);
+      };
+
+      function watchPage(p) {
+        if (!p || watchedPages.has(p) || settled) return;
+        watchedPages.add(p);
+
+        try {
+          if (typeof p.url === 'function' && matchUrl(p.url())) {
+            finishResolve(p);
+            return;
+          }
+        } catch (_) {}
+
+        if (typeof p.waitForURL === 'function') {
+          p.waitForURL((u) => matchUrl(u), { timeout, waitUntil })
+            .then(() => finishResolve(p))
+            .catch((err) => {
+              if (p === page && !settled && String(err?.message || '').includes('Timeout')) {
+                finishReject(err);
+              }
+            });
+        }
+      }
+
+      for (const existingPage of ctx.pages()) {
+        watchPage(existingPage);
+        if (settled) return;
+      }
+
+      if (typeof ctx.on === 'function') {
+        ctx.on('page', watchPage);
+      }
+
+      pollTimer = setInterval(() => {
+        if (settled) return;
+        try {
+          const currentPages = ctx.pages();
+          if (currentPages.length === 0) {
+            finishReject(new Error('Target page, context or browser has been closed'));
+            return;
+          }
+          for (const p of currentPages) {
+            watchPage(p);
+            if (settled) return;
+            if (typeof p.isClosed === 'function' && p.isClosed()) continue;
+            if (typeof p.url === 'function' && matchUrl(p.url())) {
+              finishResolve(p);
+              return;
+            }
+          }
+        } catch (_) {}
+      }, 400);
+
+      const onTimeout = () =>
+        finishReject(new Error(`page.waitForURL: Timeout ${timeout}ms exceeded.`));
+      timeoutTimer = setTimeout(onTimeout, timeout); // ok: sleep
+    });
+
+    if (matchedPage && typeof matchedPage.waitForLoadState === 'function') {
+      await matchedPage.waitForLoadState(waitUntil, { timeout: 10000 }).catch(() => {});
+    }
+
+    if (matchedPage && typeof matchedPage.waitForFunction === 'function') {
+      await matchedPage
+        .waitForFunction(
+          () => {
+            try {
+              return Boolean(localStorage.getItem('user') || localStorage.getItem('token'));
+            } catch (_) {
+              return true;
+            }
+          },
+          { timeout: 2500 }
+        )
+        .catch(() => {});
+    }
+
+    if (matchedPage && matchedPage !== page) {
+      const finalUrl = typeof matchedPage.url === 'function' ? matchedPage.url() : '';
+      if (
+        finalUrl &&
+        typeof page?.isClosed === 'function' &&
+        !page.isClosed() &&
+        typeof page.goto === 'function'
+      ) {
+        await page
+          .goto(finalUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+          .catch(() => {});
+      }
+      if (typeof matchedPage.isClosed === 'function' && !matchedPage.isClosed()) {
+        await matchedPage.close().catch(() => {});
+      }
+    }
+
+    return page;
+  }
+
+  /**
    * Handle OAuth flow (supports both popup mode and direct redirection).
    * @param {Object} params
    * @param {import('playwright').Page} params.page

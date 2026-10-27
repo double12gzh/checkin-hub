@@ -19,7 +19,7 @@ class ColumbinaPlugin extends BasePlugin {
    * Interactive setup mode for manual login.
    */
   async onSetup(context) {
-    const { page, log } = context;
+    const { page, browser, log, helper } = context;
     log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成登录...`);
     log(`[${this.name}] 正在导航至登录页: ${this.loginUrl}`);
     try {
@@ -40,13 +40,20 @@ class ColumbinaPlugin extends BasePlugin {
     }
 
     log(`[${this.name}] 等待登录完成并跳转至主页或控制台...`);
-    await page.waitForURL(
-      (url) => {
-        const p = url.pathname;
-        return !p.includes('/sign-in') && !p.includes('/login');
-      },
-      { timeout: 300000, waitUntil: 'domcontentloaded' }
-    );
+    const predicate = (url) => {
+      const p = url.pathname;
+      if (url.hostname?.includes('github.com') || p.includes('/oauth')) return false;
+      return !p.includes('/sign-in') && !p.includes('/login') && !p.includes('/register');
+    };
+    if (helper && typeof helper.waitForNavigationAcrossPages === 'function') {
+      await helper.waitForNavigationAcrossPages(page, predicate, {
+        timeout: 300000,
+        waitUntil: 'domcontentloaded',
+        browser,
+      });
+    } else {
+      await page.waitForURL(predicate, { timeout: 300000, waitUntil: 'domcontentloaded' });
+    }
     log(`[${this.name}] 登录成功！会话已自动保存。`);
   }
 

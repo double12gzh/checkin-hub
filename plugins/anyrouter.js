@@ -17,10 +17,10 @@ class AnyRouterPlugin extends BasePlugin {
   }
 
   /**
-   * 交互式 Setup 模式，支持自动带入邀请码
+   * 交互式 Setup 模式，支持自动带入邀请码与跨标签页 OAuth 登录检测
    */
   async onSetup(context) {
-    const { page, log } = context;
+    const { page, browser, log, helper } = context;
     log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成登录...`);
     log(`[${this.name}] 正在导航至注册/登录页并绑定邀请码: ${this.registerUrl}`);
     await page.goto(this.registerUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -35,10 +35,20 @@ class AnyRouterPlugin extends BasePlugin {
       .catch(() => {});
 
     log(`[${this.name}] 等待登录完成并跳转至控制台 (${this.url})...`);
-    await page.waitForURL((url) => url.pathname.includes('/console'), {
-      timeout: 300000,
-      waitUntil: 'domcontentloaded',
-    });
+    const predicate = (url) =>
+      !url.pathname.includes('/oauth') && url.pathname.includes('/console');
+    if (helper && typeof helper.waitForNavigationAcrossPages === 'function') {
+      await helper.waitForNavigationAcrossPages(page, predicate, {
+        timeout: 300000,
+        waitUntil: 'domcontentloaded',
+        browser,
+      });
+    } else {
+      await page.waitForURL(predicate, {
+        timeout: 300000,
+        waitUntil: 'domcontentloaded',
+      });
+    }
     log(`[${this.name}] 登录成功！会话已自动保存。`);
   }
 

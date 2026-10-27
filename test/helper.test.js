@@ -237,4 +237,46 @@ test('PageHelper - StorageState & Session Management', async (t) => {
       assert.equal(synced, true);
     }
   );
+
+  await t.test(
+    'waitForNavigationAcrossPages resolves when login completes in a second popup tab',
+    async () => {
+      let navigatedToUrl = null;
+      let popupClosed = false;
+
+      const tab1 = {
+        url: () => 'https://agentrouter.org/login',
+        isClosed: () => false,
+        goto: async (targetUrl) => {
+          navigatedToUrl = targetUrl;
+        },
+        waitForURL: () => new Promise(() => {}), // Tab 1 never navigates on its own
+      };
+
+      const tab2 = {
+        url: () => 'https://agentrouter.org/console/token',
+        isClosed: () => popupClosed,
+        close: async () => {
+          popupClosed = true;
+        },
+        waitForLoadState: async () => {},
+        waitForFunction: async () => true,
+      };
+
+      const mockContext = {
+        pages: () => [tab1, tab2],
+        on: () => {},
+        off: () => {},
+      };
+
+      await PageHelper.waitForNavigationAcrossPages(
+        tab1,
+        (url) => !url.pathname.includes('/oauth') && url.pathname.includes('/console'),
+        { timeout: 5000, browser: mockContext }
+      );
+
+      assert.equal(navigatedToUrl, 'https://agentrouter.org/console/token');
+      assert.equal(popupClosed, true);
+    }
+  );
 });

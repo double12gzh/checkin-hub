@@ -159,21 +159,34 @@ class HcnsecPlugin extends BasePlugin {
     })();
 
     try {
-      await page.waitForURL(
-        (url) => {
-          const p = url.pathname;
-          if (p.includes('/login') || p.includes('/sign-in')) return false;
-          return (
-            url.href.startsWith(this.url) ||
-            p.includes('/console') ||
-            p.includes('/dashboard') ||
-            p.includes('/token') ||
-            p.includes('/profile') ||
-            p === '/'
-          );
-        },
-        { timeout: 300000, waitUntil: 'domcontentloaded' }
-      );
+      const predicate = (url) => {
+        const p = url.pathname;
+        if (
+          p.includes('/login') ||
+          p.includes('/sign-in') ||
+          p.includes('/oauth') ||
+          url.hostname?.includes('github.com')
+        ) {
+          return false;
+        }
+        return (
+          url.href.startsWith(this.url) ||
+          p.includes('/console') ||
+          p.includes('/dashboard') ||
+          p.includes('/token') ||
+          p.includes('/profile') ||
+          p === '/'
+        );
+      };
+      if (helper && typeof helper.waitForNavigationAcrossPages === 'function') {
+        await helper.waitForNavigationAcrossPages(page, predicate, {
+          timeout: 300000,
+          waitUntil: 'domcontentloaded',
+          browser: context.browser,
+        });
+      } else {
+        await page.waitForURL(predicate, { timeout: 300000, waitUntil: 'domcontentloaded' });
+      }
       await autoLoginTask.catch(() => {});
       const todayISO = helper.getCSTISODateString
         ? helper.getCSTISODateString()

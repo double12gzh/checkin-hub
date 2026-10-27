@@ -1,3 +1,5 @@
+const { PageHelper } = require('./helper');
+
 /**
  * BasePlugin defines the standard interface and default lifecycle hooks for all check-in plugins.
  */
@@ -23,7 +25,7 @@ class BasePlugin {
    * @param {Object} context - { page, browser, log, helper, options }
    */
   async onSetup(context) {
-    const { page, log } = context;
+    const { page, browser, log, helper = PageHelper } = context;
     const targetLoginUrl = this.loginUrl || this.url;
     log(`[${this.name}] Setup 模式：请在弹出的浏览器中完成登录...`);
     log(`[${this.name}] 正在导航至: ${targetLoginUrl}`);
@@ -31,9 +33,23 @@ class BasePlugin {
     log(`[${this.name}] 等待登录完成，跳转至控制台或主页 (${this.url})...`);
     const loginPath = this.loginUrl ? new URL(this.loginUrl).pathname : null;
     const targetPath = this.url ? new URL(this.url).pathname : '/';
-    await page.waitForURL(
+    const waitNav =
+      helper && typeof helper.waitForNavigationAcrossPages === 'function'
+        ? (pred, opts) => helper.waitForNavigationAcrossPages(page, pred, { ...opts, browser })
+        : (pred, opts) => page.waitForURL(pred, opts);
+
+    await waitNav(
       (url) => {
         const currentPath = url.pathname;
+        if (
+          url.hostname?.includes('github.com') ||
+          currentPath.includes('/login') ||
+          currentPath.includes('/sign-in') ||
+          currentPath.includes('/register') ||
+          currentPath.includes('/oauth')
+        ) {
+          return false;
+        }
         // Must not be still on the login page if loginPath is defined and distinct
         if (
           loginPath &&
